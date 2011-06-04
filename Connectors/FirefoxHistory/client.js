@@ -30,15 +30,21 @@ app.get('/', function(req, res) {
     fs.mkdir('my', 0755);
 
     var ff_profiles_dir = null;
+    console.log('This platform is ' + process.platform); //++debug
     switch (process.platform) {
     // TODO: Add paths for other platforms
     case "darwin":
         ff_profiles_dir = process.env.HOME +
             '/Library/Application Support/Firefox/Profiles';
         break;
+    case "linux":
+        ff_profiles_dir = process.env.HOME +
+            '/.mozilla/firefox';
     default:
         break;
     }
+
+    console.log('ff_profiles_dir= ' + ff_profiles_dir); //++debug
 
     if (ff_profiles_dir) {
         var files = fs.readdirSync(ff_profiles_dir);
