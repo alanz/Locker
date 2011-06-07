@@ -68,7 +68,9 @@ app.get("/update", function(req, res) {
 function gatherLinks(){
     // This should really be timered, triggered, something else
     var me = lfs.loadMeData();
+    console.log('links:gatherlinks:me.use' + me.use); //++debug
     for(var conn in me.use)
+        console.log('links:gatherlinks:conn' + conn); //++debug
         addLinksFromConn(conn,'/allLinks',me.use[conn]);
 }
 
@@ -90,6 +92,7 @@ function parseLinesOfJSON(data) {
 }
 
 function addLinksFromConn(conn, path, type) {
+    console.log('links:addLinksFromConn:conn' + conn + ',' + path + ',' + type); //++debug
     var puri = url.parse(lockerInfo.lockerUrl);
     var httpClient = http.createClient(puri.port);
     var request = httpClient.request('GET', '/Me/'+conn+path);

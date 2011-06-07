@@ -91,7 +91,7 @@ exports.syncMeData = function(metadata) {
 }
 
 /**
- * Reads the metadata file (meta.json) from the specificed account, or the first one found
+ * Reads the metadata file (meta.json) from the specified account, or the first one found
  * if no account is specified
  */
 exports.loadMeData = function() {
