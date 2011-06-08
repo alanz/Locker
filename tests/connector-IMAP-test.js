@@ -8,7 +8,7 @@
 */
 //testing for the IMAP connector against a live IMAP server
 
-var sync = require('../Connectors/imap/sync');
+var sync = require('../Connectors/IMAP/sync');
 var dataStore = require('../Common/node/connector/dataStore');
 var assert = require('assert');
 var RESTeasy = require('api-easy');
@@ -67,14 +67,14 @@ suite.next().suite.addBatch({
             sync.syncMessages(this.callback);
         },
         "successfully" : function(err, repeatAfter, diaryEntry) {
-            assert.equal(repeatAfter, 600);
+            assert.equal(repeatAfter, 3600);
             assert.equal(diaryEntry, "sync'd 5 new messages"); },
         "again" : {
             topic: function() {
                 sync.syncMessages(this.callback);
             },
             "successfully" : function(err, repeatAfter, diaryEntry) {
-                assert.equal(repeatAfter, 600);
+                assert.equal(repeatAfter, 3600);
                 assert.equal(diaryEntry, "sync'd 0 new messages"); 
             }
          }
