@@ -20,7 +20,7 @@ var request = require('request'),
     EventEmitter = require('events').EventEmitter,
     dataStore = require('../../Common/node/connector/dataStore');
     
-var auth, userInfo, latests;
+var auth, profile, latests;
 var twitterClient;
 var allKnownIDs;
 var requestCount = 0;
@@ -34,8 +34,8 @@ exports.init = function(theAuth, mongoCollections) {
         latests = JSON.parse(fs.readFileSync('latests.json'));
     } catch (err) { latests = {}; }
     try {
-        userInfo = JSON.parse(fs.readFileSync('userInfo.json'));
-    } catch (err) { userInfo = {}; }
+        profile = JSON.parse(fs.readFileSync('profile.json'));
+    } catch (err) { profile = {}; }
     try {
         allKnownIDs = JSON.parse(fs.readFileSync('allKnownIDs.json'));
     } catch (err) { allKnownIDs = {friends:{}, followers:{}}; }
@@ -70,6 +70,15 @@ function addStatuses(type, statuses, callback) {
     dataStore.addObject(type, status, function(err) {
         var eventObj = {source:type, type:'new', status:status};
         exports.eventEmitter.emit('status/twitter', eventObj);
+        // console.error('status', status);
+        if(status.entities && status.entities.urls && status.entities.urls.length) {
+            for(var i in status.entities.urls) {
+                var eventObj = {source:type, type:'new', 
+                                data:{url:status.entities.urls[i],
+                                      sourceObject:status}};
+                exports.eventEmitter.emit('link/twitter', eventObj);
+            }
+        }
         addStatuses(type, statuses, callback);
     });
     
@@ -128,9 +137,9 @@ exports.syncUsersInfo = function(friendsOrFollowers, callback) {
         friendsOrFollowers = 'friends';
         
     getUserInfo(function(err, newUserInfo) {
-        userInfo = newUserInfo;
-        lfs.writeObjectToFile('usersInfo.json', userInfo);
-        getIDs(friendsOrFollowers, userInfo.screen_name, function(err, ids) {
+        profile = newUserInfo;
+        lfs.writeObjectToFile('profile.json', profile);
+        getIDs(friendsOrFollowers, profile.screen_name, function(err, ids) {
             var newIDs = [];
             var knownIDs = allKnownIDs[friendsOrFollowers];
             var repeatedIDs = {};
@@ -266,8 +275,8 @@ function updatePeople(type, people, callback) {
 // Syncs the profile of the auth'd user
 exports.syncProfile = function(callback) {
     getUserInfo(function(err, newUserInfo) {
-        userInfo = newUserInfo;
-        lfs.writeObjectToFile('userInfo.json', userInfo);
+        profile = newUserInfo;
+        lfs.writeObjectToFile('profile.json', profile);
         callback(err, newUserInfo);
     });
 }
