@@ -1,13 +1,26 @@
+var log = function(msg) { if (console && console.log) console.debug(msg); }
+
 var baseURL = 'http://localhost:8042/query';
 var data = {};
 
-function getContacts(skip, limit, callback) {
-    console.log(baseURL + '/getContact'); //
-    $.getJSON(baseURL + '/getContact', {offset:skip, limit:100}, callback);
+// divClicked
+var showing = {};
+
+/**
+ * Pulls contacts from Locker API
+ * skip - offset number
+ * limit - limit used (unused)
+ * callback
+ */
+function getContacts(offset, callback) {
+    $.getJSON(baseURL + '/getContact', {offset:offset}, callback);
 }
 
+/**
+ * Adds a Row to the contactsTable.
+ * contact
+ */
 function addRow(contact) {
-    console.log('adding contact:', contact);
     data[contact._id] = contact;
     var contactsTable = $("#table #contacts");
     contactsTable.append('<div id="' + contact._id + '" class="contact"><span class="basic-data"></span></div>');
@@ -20,29 +33,59 @@ function addRow(contact) {
     addName(theDiv, contact);
     addEmail(theDiv, contact);
     addTwitter(theDiv, contact);
-    // addLinkedIn(theDiv, contact);
-    // addGitHub(theDiv, contact);
     contactsTable.append('<br>');
 }
 
+/**
+ * Adds a photo or silhouette to the div
+ * div - $(HTMLElement) to append to
+ * contact - contact obj
+ */
 function addPhoto(div, contact) {
     var image_url = getPhotoUrl(contact);
+    
     if(image_url)
         div.append('<span class="column photo"><img src="' + image_url + '"></span>');
     else
         div.append('<span class="column photo"><img src="img/silhouette.png"></span>');
 }
 
+/**
+ * Get the URL for a contact 
+ * contact - contact obj
+ * fullsize - does nothing
+ */
 function getPhotoUrl(contact, fullsize) {
-    if(contact.photos && contact.photos.length)
-        return contact.photos[0];
-    return 'img/silhouette.png';
+    var url = 'img/silhouette.png';
+    if(contact.photos && contact.photos.length) {
+        url = contact.photos[0];
+        //twitter
+        if(fullsize && url.match(/_normal\.(jpg||png)/) && !url.match(/.*default_profile_([0-9])_normal\.png/))
+            url = url.replace(/_normal\.(jpg||png)/, '.$1');
+        else if(url.indexOf('https://graph.facebook.com/') === 0) {
+            if(fullsize)
+                url = url += "?return_ssl_resources=1&type=large";
+            else
+                url = url += "?return_ssl_resources=1&type=square";
+        }
+    }
+    return url;
 }
 
+/** 
+ * add the person's name to a div
+ * div - $(HTMLElement) to append to
+ * contact - contact obj
+ */
 function addName(div, contact) {
     div.append('<span class="column name">' + (contact.name || '') + '</span>');
 }
 
+/**
+ * Add the person's email to a div
+ * div - $(HTMLElement)
+ * contact - contact obj
+ */
 function addEmail(div, contact) {
     var email;
     if(contact.emails && contact.emails.length)
@@ -50,6 +93,11 @@ function addEmail(div, contact) {
     div.append('<span class="column email">' + (email || '&nbsp;') + '</span>');
 }
 
+/**
+ * Add the person's twitter username to a div
+ * div - $(HTMLElement)
+ * contact - contact obj
+ */
 function addTwitter(div, contact) {
     var twitterUsername;
     if(contact.accounts.twitter && contact.accounts.twitter[0].data 
@@ -64,6 +112,30 @@ function addTwitter(div, contact) {
         div.append('<span class="column twitter"></span>');
 }
 
+/**
+ * Add the person's twitter username to a div
+ * div - $(HTMLElement)
+ * contact - contact obj
+ */
+function addGithub(div, contact) {
+    var twitterUsername;
+    if(contact.accounts.twitter && contact.accounts.twitter[0].data 
+        && contact.accounts.twitter[0].data.screen_name)
+        twitterUsername = contact.accounts.twitter[0].data.screen_name;
+    
+    if(twitterUsername) {
+        div.append('<span class="column twitter">' +
+                         '<a target="_blank" href="https://twitter.com/' + twitterUsername + '">@' 
+                         + twitterUsername + '</a></span>');
+    } else
+        div.append('<span class="column twitter"></span>');
+}
+
+/**
+ * Add the person's facebook details to a div
+ * div
+ * contact 
+ */
 function addFacebook(div, contact) {
     var facebookUsername;
     if(contact.accounts.twitter && contact.accounts.twitter[0].data 
@@ -78,6 +150,10 @@ function addFacebook(div, contact) {
         div.append('<span class="column twitter"></span>');
 }
 
+/**
+ * get the location of a contact 
+ * contact - contact obj
+ */
 function getLocation(contact) {
     if(contact.addresses && contact.addresses) {
         for(var i in contact.addresses) {
@@ -88,58 +164,31 @@ function getLocation(contact) {
     return '';
 }
 
-var sort = {};
-
-var start = 0, end = 100, currentSort;
-
-function reload(sortField, _start, _end, callback) {
-    var usedSortField = getSort(sortField);
-    console.log(usedSortField);
-    console.log('_start _end:', _start, _end);
-    start = _start || 0; end = _end || 100;
-    var queryText = $('#query-text').val();
-    getContacts(start, end - start, function(contacts) {
-       console.log('contacts',contacts);
-        // console.log(contacts.length);
+/**
+ * Reload the display (get contacts, render them)
+ * sortField
+ * _start
+ * _end
+ * callback
+ */
+function reload(callback) {
+    var getContactsCB = function(contacts) {
         var contactsTable = $("#table #contacts");
-        if(start == 0 || sortField) {
-            showing = {};
-            contactsTable.html('');
-        }
+        showing = {};
+        contactsTable.html('');
         for(var i in contacts)
             addRow(contacts[i]);
         if(callback) callback();
-    });
+    };
+    getContacts(0, getContactsCB);
 }
 
 
-function getSort(sortField) {
-    if(sortField) {
-        var direction = 'asc';
-        if(sort[sortField]) {
-            if(sort[sortField] == 'asc') 
-                direction = 'desc';
-            else
-                direction = 'asc';
-        }
-        sort[sortField] = direction;
-        currentSort = [sortField, direction];
-    }
-    return currentSort;
-}
-
-function loadMore(callback) {
-    console.log('loading maaawr!!!');
-    start = end;
-    end += 100;
-    reload(null, start, end, function() {
-        if(callback) callback();
-    });
-}
-
-var showing = {};
+/**
+ * Div Clicked 
+ * id 
+ **/
 function divClicked(id) {
-    console.log(id);
     if(showing[id] === undefined) {
         var div = $("#table #contacts #" + id);
         div.append('<div class="more_info"></div>');
@@ -155,8 +204,14 @@ function divClicked(id) {
         div.show();
         showing[id] = true;
     }
+
 }
 
+/**
+ * Get More Div
+ * newDiv - 
+ * contact - 
+ **/
 var moreDiv = '<div.'
 function getMoreDiv(newDiv, contact) {
     var text = $("#more_blank").html();
@@ -166,15 +221,21 @@ function getMoreDiv(newDiv, contact) {
     newDiv.find('.name_and_loc .location').html(getLocation(contact));
     
     if(contact.accounts.twitter)
-        addTwitterDetails(newDiv, contact.accounts.twitter[0]);
+        addTwitterDetails(newDiv, contact.accounts.twitter[0]);    
+    if(contact.accounts.github)
+        addGithubDetails(newDiv, contact.accounts.github[0]);
     if(contact.accounts.facebook)
         addFacebookDetails(newDiv, contact.accounts.facebook[0]);    
     if(contact.accounts.foursquare)
         addFoursquareDetails(newDiv, contact.accounts.foursquare[0]);
 }
 
+/**
+ * Add Twitter Details
+ * newDiv - 
+ * twitter
+ */
 function addTwitterDetails(newDiv, twitter) {
-    console.log('twitter:', twitter);
     if(twitter && twitter.data) {
         newDiv.find('.twitter-details .username')
                  .append('<a target="_blank" href="https://twitter.com/' + twitter.data.screen_name + '">@' + twitter.data.screen_name + '</a>');
@@ -185,8 +246,27 @@ function addTwitterDetails(newDiv, twitter) {
     }
 }
 
+/**
+ * Add Github Details
+ * newDiv - 
+ * twitter
+ */
+function addGithubDetails(newDiv, github) {
+    if(github && github.data) {
+        newDiv.find('.github-details .login')
+                 .append('<a target="_blank" href="https://github.com/' + github.data.login + '">' + github.data.login + '</a>');
+        newDiv.find('.github-details .followers').append(github.data.followers_count);
+        newDiv.find('.github-details .following').append(github.data.following_count);
+        newDiv.find('.github-details .repos').append(github.data.public_repo_count);
+        newDiv.find('.github-details').css({display:'block'});
+    }
+}
+/**
+ * Add Facebook Details
+ * newDiv - 
+ * fb - 
+ */
 function addFacebookDetails(newDiv, fb) {
-    console.log('fb:', fb);
     var name = fb.data.name || (fb.data.first_name + ' ' + fb.data.last_name);
     if(fb && fb.data) {
         newDiv.find('.facebook-details .name')
@@ -195,10 +275,13 @@ function addFacebookDetails(newDiv, fb) {
     }
 }
 
+/**
+ * Add Foursquare Details
+ * newDiv - 
+ * foursquare - 
+ */
 function addFoursquareDetails(newDiv, foursquare) {
-    console.log('foursquare:', foursquare);
     var name = foursquare.data.name || (foursquare.data.firstName + ' ' + foursquare.data.lastName);
-    console.log('foursquare.name:', name);
     if(foursquare && foursquare.data) {
         newDiv.find('.foursquare-details .name')
                  .append('<a target="_blank" href="https://foursquare.com/user/' + foursquare.data.id + '">' + name + '</a>');
@@ -208,16 +291,20 @@ function addFoursquareDetails(newDiv, foursquare) {
     }
 }
 
+/** 
+ * Show Full
+ * id - 
+ */
 function showFull(id) {
-    console.log(id);
     var div = $("#table #contacts #" + id);
     div.css({'height':'400px'});
     div.append('<div>' + JSON.stringify(data[id]) + '</div>');
 }
 
-
+/* jQuery syntactic sugar for onDomReady */
 $(function() {
-    reload('dates.rapportive.engaged', start, end);
+    console.debug("dom ready");
+    reload();
     $('#query-text').keyup(function(key) {
         if(key.keyCode == 13)
             reload();

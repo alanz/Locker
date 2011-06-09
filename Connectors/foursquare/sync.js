@@ -12,7 +12,8 @@ var fs = require('fs'),
     request = require('request'),
     dataStore = require('../../Common/node/connector/dataStore'),
     shallowCompare = require('../../Common/node/shallowCompare'),
-    app = require('../../Common/node/connector/api');
+    utils = require('../../Common/node/connector/utils'),
+    app = require('../../Common/node/connector/api'),
     EventEmitter = require('events').EventEmitter;
 
     
@@ -28,23 +29,19 @@ exports.init = function(theauth, mongoCollections) {
         updateState = {checkins:{syncedThrough:0}}; }
     try {
         allKnownIDs = JSON.parse(fs.readFileSync('allKnownIDs.json'));
-    } catch (err) { allKnownIDs = {}; }
+    } catch (err) { allKnownIDs = []; }
     dataStore.init("id", mongoCollections);
 }
 
 
 exports.syncFriends = function(callback) {
     getMe(auth.accessToken, function(err, resp, data) {
-        var newIDs = [];
-        var knownIDs = allKnownIDs;
-        var repeatedIDs = [];
         if(err) {
-            // do something smrt
             console.error(err);
-            return;
+            return callback(err);
         } else if(resp && resp.statusCode > 500) { //fail whale
             console.error(resp);
-            return;
+            return callback(resp);
         }
         var self = JSON.parse(data).response.user;
         fs.writeFile('profile.json', JSON.stringify(self));
@@ -52,45 +49,21 @@ exports.syncFriends = function(callback) {
         fs.mkdir('photos', 0755);
         request.get({uri:'https://api.foursquare.com/v2/users/self/friends.json?oauth_token=' + auth.accessToken}, 
         function(err, resp, body) {
-            var friends = JSON.parse(body).response.friends.items;
-            var queue = [];
-            var users = {
-                'id': userID,
-                'queue': queue,
-                'token': auth.accessToken
-            };
-            var removedIDs = [];
-            for (var i = 0; i < friends.length; i++) {
-                queue.push(friends[i]);
-                if(!knownIDs[friends[i].id])
-                    newIDs.push(friends[i].id);
-                else
-                    repeatedIDs.push(friends[i].id);
-            }
-            for(var knownID in knownIDs) {
-                if(repeatedIDs.indexOf(knownID) === -1)
-                    removedIDs.push(knownID);
-            }
-            if(newIDs.length < 1) {
-                if(removedIDs.length > 0) {
-                    var removedCount = removedIDs.length;
-                    logRemoved(removedIDs, function(err) {
-                        callback(err, 3600, "no new friends, removed " + removedCount + " deleted friends");
-                    });
-                } else {
-                    downloadUsers(repeatedIDs, auth.accessToken, function(err) {
-                        callback(err, 3600, "no new friends, updated " + repeatedIDs.length + " existing friends");
+            var friends = JSON.parse(body).response.friends.items.map(function(item) {return item.id});
+            var removedIDs = utils.checkDeletedIDs(allKnownIDs, friends);
+            var removedCount = removedIDs.length;
+            allKnownIDs = friends;
+            fs.writeFile('allKnownIDs.json', JSON.stringify(allKnownIDs));
+            
+            if (removedCount > 0) {
+                logRemoved(removedIDs, function(err) {
+                    downloadUsers(friends, auth.accessToken, function(err) {
+                        callback(err, 3600, "Updated " + friends.length + " existing friends, deleted " + removedCount + " friends");
                     })
-                }
+                });
             } else {
-                for (var i = 0; i < newIDs.length; i++) {
-                    allKnownIDs[newIDs[i]] = 1;
-                }
-                fs.writeFile('allKnownIDs.json', JSON.stringify(allKnownIDs));
-                if(removedIDs.length > 0)
-                    logRemoved(removedIDs, function(err) {});
-                downloadUsers(newIDs, auth.accessToken, function(err) {
-                    callback(err, 3600, "sync'd " + newIDs.length + " new friends");    
+                downloadUsers(friends, auth.accessToken, function(err) {
+                    callback(err, 3600, "Updated " + friends.length + " friends");    
                 });
             }
         });
@@ -181,8 +154,7 @@ function downloadUsers(users, token, callback) {
     var coll = users.slice(0);
     (function downloadUser() {
         if (coll.length == 0) {
-            callback();
-            return;
+            return callback();
         }
         var friends = coll.splice(0, 5);
         try {
@@ -196,11 +168,11 @@ function downloadUsers(users, token, callback) {
                 if(response.meta.code >= 400) {
                     allKnownIDs = JSON.parse(fs.readFileSync('allKnownIDs.json'));
                     for (var i = 0; i < friends.length; i++) {
-                        delete allKnownIDs[friends[i]];
+                        delete allKnownIDs[allKnownIDs.indexOf(friends[i])];
                     }
                     fs.writeFile('allKnownIDs.json', JSON.stringify(allKnownIDs));
                     if (coll.length == 0) {
-                        callback();
+                        return callback();
                     } else {
                         downloadUser();
                     }
@@ -217,31 +189,27 @@ function downloadUsers(users, token, callback) {
                     if (js.photo.indexOf("userpix") > 0) {
                         // fetch photo
                         request.get({uri:js.photo, encoding: 'binary'}, function(err, resp, body) {
-                            if(err)
+                            if (err)
                                 console.error(err);
                             else
-                                fs.writeFileSync('photos/' + js.id + '.jpg', body, 'binary');
+                                fs.writeFile('photos/' + js.id + '.jpg', body, 'binary');
                         });
                     }
                     dataStore.getCurrent("friends", js.id, function(err, resp) {
-                        if (resp === undefined) {
-                            var eventObj = {source:'friends', type:'new', data:js};
-                            exports.eventEmitter.emit('contact/foursquare', eventObj);
-                            dataStore.addObject("friends", js, function(err) {
-                                parseUser();
-                            });
-                        } else {
+                        var eventObj = {};
+                        if (resp) {
                             delete resp['_id'];
                             if (shallowCompare(js, resp)) {
-                                parseUser();
-                            } else {
-                                var eventObj = {source:'friends', type:'update', data:js};
-                                exports.eventEmitter.emit('contact/foursquare', eventObj);
-                                dataStore.addObject("friends", js, function(err) {
-                                    parseUser();
-                                });                            
+                                return parseUser();
                             }
+                            eventObj = {source:'friends', type:'update', data:js};
+                        } else {
+                            eventObj = {source:'friends', type:'new', data:js};
                         }
+                        exports.eventEmitter.emit('contact/foursquare', eventObj);
+                        dataStore.addObject("friends", js, function(err) {
+                            parseUser();
+                        });                            
                     })
                 })();
             });
