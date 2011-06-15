@@ -28,7 +28,7 @@ exports.serviceMap = function() {
 }
 
 exports.providers = function(types) {
-    var services = []
+    var services = [];
     for(var svcId in serviceMap.installed) {
         if (!serviceMap.installed.hasOwnProperty(svcId))  continue;
         var service = serviceMap.installed[svcId];
@@ -63,23 +63,25 @@ function mapMetaData(file, type, installable) {
     metaData.srcdir = path.dirname(file);
     metaData.is = type;
     metaData.installable = installable;
-    serviceMap["available"].push(metaData);        
-    if (type === "collection") {
-        if(!metaData.handle)
-        {
-            console.error("missing handle for "+file);
-            return;
-        }
-        fs.stat(lconfig.lockerDir+"/Me/"+metaData.handle,function(err,stat){
-            if(err || !stat)
+    if (lconfig.displayUnstable || metaData.status === 'stable') {
+        serviceMap.available.push(metaData);        
+        if (type === "collection") {
+            if(!metaData.handle)
             {
-                metaData.id=metaData.handle;
-                metaData.uri = lconfig.lockerBase+"/Me/"+metaData.id+"/";
-                serviceMap.installed[metaData.id] = metaData;
-                fs.mkdirSync(lconfig.lockerDir + "/Me/"+metaData.id,0755);
-                fs.writeFileSync(lconfig.lockerDir + "/Me/"+metaData.id+'/me.json',JSON.stringify(metaData));
+                console.error("missing handle for "+file);
+                return;
             }
-        });
+            fs.stat(lconfig.lockerDir+"/Me/"+metaData.handle,function(err,stat){
+                if(err || !stat)
+                {
+                    metaData.id=metaData.handle;
+                    metaData.uri = lconfig.lockerBase+"/Me/"+metaData.id+"/";
+                    serviceMap.installed[metaData.id] = metaData;
+                    fs.mkdirSync(lconfig.lockerDir + "/Me/"+metaData.id,0755);
+                    fs.writeFileSync(lconfig.lockerDir + "/Me/"+metaData.id+'/me.json',JSON.stringify(metaData));
+                }
+            });
+        }
     }
 
     return metaData;
@@ -129,6 +131,7 @@ exports.findInstalled = function () {
             var js = JSON.parse(fs.readFileSync(dir+'/me.json', 'utf-8'));
             delete js.pid;
             delete js.starting;
+            exports.migrate(dir, js);
             console.log("Loaded " + js.id);
             serviceMap.installed[js.id] = js;
         } catch (E) {
@@ -138,14 +141,43 @@ exports.findInstalled = function () {
 }
 
 /**
+* Migrate a service if necessary
+*/
+exports.migrate = function(installedDir, metaData) {
+    if (!metaData.version) { metaData.version = 1; }
+    var migrations = [];
+    try {
+        migrations = fs.readdirSync(metaData.srcdir + "/migrations");
+    } catch (E) {}
+    if (migrations) {
+        for (var i = 0; i < migrations.length; i++) {
+            if (migrations[i].substring(0, 13) > metaData.version) {
+                try {
+                    var cwd = process.cwd();
+                    migrate = require(cwd + "/" + metaData.srcdir + "/migrations/" + migrations[i]);
+                    if (migrate(installedDir)) {
+                        metaData.version = migrations[i].substring(0, 13);
+                    }
+                    process.chdir(cwd);
+                } catch (E) {
+                    console.log("error running migration : " + migrations[i] + " for service " + metaData.title + " ---- " + E);
+                    process.chdir(cwd);
+                }
+            }
+        }
+    }
+    return;
+}
+
+/**
 * Install a service
 */
 exports.install = function(metaData) {
-    var serviceInfo = undefined;
+    var serviceInfo;
     serviceMap.available.some(function(svcInfo) {
         if (svcInfo.srcdir == metaData.srcdir) {
-            serviceInfo = new Object();
-            for(var a in svcInfo){serviceInfo[a]=svcInfo[a];};
+            serviceInfo = {};
+            for(var a in svcInfo){serviceInfo[a]=svcInfo[a];}
             return true;
         }
         return false;
@@ -153,9 +185,14 @@ exports.install = function(metaData) {
     if (!serviceInfo || !serviceInfo.installable) {
         return serviceInfo;
     }
+    var authInfo;
     // local/internal name for the service on disk and whatnot, try to make it more friendly to devs/debugging
     if(serviceInfo.handle)
     {
+        try {
+            var apiKeys = JSON.parse(fs.readFileSync(lconfig.lockerDir + "/Me/apikeys.json", 'ascii'));
+            authInfo = apiKeys[serviceInfo.handle];
+        } catch (E) {}
         // the inanity of this try/catch bullshit is drrrrrrnt but async is stupid here and I'm offline to find a better way atm
         var inc = 0;
         try {
@@ -174,10 +211,13 @@ exports.install = function(metaData) {
         serviceInfo.id = hash.digest('hex');        
     }
     serviceInfo.uri = lconfig.lockerBase+"/Me/"+serviceInfo.id+"/";
+    serviceInfo.version = Date.now();
     serviceMap.installed[serviceInfo.id] = serviceInfo;
     fs.mkdirSync(lconfig.lockerDir + "/Me/"+serviceInfo.id,0755);
     fs.writeFileSync(lconfig.lockerDir + "/Me/"+serviceInfo.id+'/me.json',JSON.stringify(serviceInfo));
-
+    if (authInfo) {
+        fs.writeFileSync(lconfig.lockerDir + "/Me/" + serviceInfo.id + '/auth.json', JSON.stringify(authInfo));
+    }
     return serviceInfo;
 }
 
@@ -247,7 +287,6 @@ exports.spawn = function(serviceId, callback) {
     var processInformation = {
         port: svc.port, // This is just a suggested port
         sourceDirectory: svc.srcdir,
-        processOptions: {},
         workingDirectory: lconfig.lockerDir + '/Me/' + svc.id, // A path into the me directory
         lockerUrl:lconfig.lockerBase
     };
@@ -258,19 +297,18 @@ exports.spawn = function(serviceId, callback) {
         }
         processInformation.mongo.collections = serviceInfo.mongoCollections;
     }
-    if (serviceInfo && serviceInfo.processOptions) {
-        processInformation.processOptions = serviceInfo.processOptions;
-    }
-    app = spawn(run.shift(), run, {cwd: svc.srcdir});
+    var env = process.env;
+    env["NODE_PATH"] = lconfig.lockerDir+'/Common/node/';
+    app = spawn(run.shift(), run, {cwd: svc.srcdir, env:process.env});
     app.stderr.on('data', function (data) {
-        var mod = console.outputModule
-        console.outputModule = svc.title
+        var mod = console.outputModule;
+        console.outputModule = svc.title;
         console.error(data);
-        console.outputModule = mod
+        console.outputModule = mod;
     });
     app.stdout.on('data',function (data) {
-        var mod = console.outputModule
-        console.outputModule = svc.title
+        var mod = console.outputModule;
+        console.outputModule = svc.title;
         if (svc.hasOwnProperty("pid")) {
             // We're already running so just log it for them
             console.log(data);
@@ -362,7 +400,7 @@ exports.shutdown = function(cb) {
 * Return whether the service is running
 */
 exports.isRunning = function(serviceId) {
-    return exports.isInstalled(serviceId) && exports.metaInfo(serviceId).pid
+    return exports.isInstalled(serviceId) && exports.metaInfo(serviceId).pid;
 }
 
 function checkForShutdown() {

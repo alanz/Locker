@@ -101,23 +101,28 @@ locker.get("/query/:query", function(req, res) {
         }
 
         var mongo = require("lmongoclient")(config.mongo.host, config.mongo.port, provider.id, provider.mongoCollections);
-        mongo.connect(function(collections) {
-            var collection = collections[provider.mongoCollections[0]];
-            console.log("Querying " + JSON.stringify(query));
-            var options = {};
-            if (query.limit) options.limit = query.limit;
-            if (query.offset) options.skip = query.offset;
-            collection.find(query.query, options, function(err, foundObjects) {
-                if (err) {
-                    res.writeHead(500);
-                    res.end(err);
-                    return;
-                }
+        mongo.connect(function(mongo) {
+            try {
+                var collection = mongo.collections[provider.mongoCollections[0]];
+                console.log("Querying " + JSON.stringify(query));
+                var options = {};
+                if (query.limit) options.limit = query.limit;
+                if (query.skip) options.skip = query.skip;
+                collection.find(query.query, options, function(err, foundObjects) {
+                    if (err) {
+                        res.writeHead(500);
+                        res.end(err);
+                        return;
+                    }
 
-                foundObjects.toArray(function(err, objects) {
-                    res.end(JSON.stringify(objects));
+                    foundObjects.toArray(function(err, objects) {
+                        res.end(JSON.stringify(objects));
+                    });
                 });
-            });
+            } catch (E) {
+                res.writeHead(500);
+                res.end('Something broke while trying to query Mongo : ' + E);
+            }
         });
     } catch (E) {
         res.writeHead(400);
@@ -177,7 +182,6 @@ locker.get('/Me/*', function(req,res){
     if (slashIndex < 0) slashIndex = req.url.length;
     var id = req.url.substring(4, slashIndex);
     var ppath = req.url.substring(slashIndex);
-    console.log("Proxying a get to " + ppath + " to service " + req.url);
     if(!serviceManager.isInstalled(id)) { // make sure it exists before it can be opened
         res.writeHead(404);
         res.end("so sad, couldn't find "+id);

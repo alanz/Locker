@@ -21,12 +21,13 @@ exports.load = function(filepath) {
     exports.lockerPort = config.lockerPort || 8042;
     setLockerBase();
     exports.scannedDirs = config.scannedDirs;
+    exports.displayUnstable = config.displayUnstable;
     exports.mongo = config.mongo;
     exports.me = config.me;
     exports.lockerDir = process.cwd();
 }
 
 function setLockerBase() {
-    exports.lockerBase = 'http://' + exports.lockerHost 
-                                   + (exports.lockerPort && exports.lockerPort != 80 ? ':' + exports.lockerPort : '');
+    exports.lockerBase = 'http://' + exports.lockerHost + 
+                         (exports.lockerPort && exports.lockerPort != 80 ? ':' + exports.lockerPort : '');
 }

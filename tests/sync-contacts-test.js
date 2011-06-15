@@ -12,9 +12,8 @@ var svcId = 'contacts';
 var request = require('request');
 
 var RESTeasy = require('api-easy');
-var suite = RESTeasy.describe("Contacts Collection")
+var suite = RESTeasy.describe("Contacts Collection");
 
-var shallowCompare = require('../Common/node/shallowCompare.js');
 var friend;
 
 var thecollections = ['contacts'];
@@ -25,26 +24,10 @@ var lmongoclient = require('../Common/node/lmongoclient.js')(lconfig.mongo.host,
 var mePath = '/Me/' + svcId;
 
 var events = 0;
-
-var data = {id: 18387, 
-            firstName: "William", 
-            lastName: "Warnecke",
-            photo: "https://foursquare.com/img/blank_boy.png",
-            gender: "male",
-            homeCity: "San Francisco, CA",
-            relationship: "friend",
-            type: "user",
-            pings: true,
-            contact: { "email": "lockerproject@sing.ly", "twitter": "ww" },
-            badges: { "count": 25 },
-            mayorships: { "count": 0, "items": [] },
-            checkins: { "count": 0 },
-            friends: { "count": 88, "groups": ["Object"] },
-            following: { "count": 13 },
-            tips: { "count": 5 },
-            todos: { "count": 1 },
-            scores: { "recent": 14, "max": 90,"checkinsCount": 4 },
-            name: "William Warnecke" };
+var fs = require('fs');
+var foursquareEvent1 = fs.readFileSync('fixtures/events/contacts/foursquare_contact_1.json');
+var foursquareEvent2 = fs.readFileSync('fixtures/events/contacts/foursquare_contact_2.json');
+var foursquareEvent3 = fs.readFileSync('fixtures/events/contacts/foursquare_contact_3.json');
 
 suite.next().suite.addBatch({
     "Can pull in the contacts from foursquare" : {
@@ -59,8 +42,8 @@ suite.next().suite.addBatch({
             var self = this;
             process.chdir('./Me/contacts');
             request.get({url:lconfig.lockerBase + "/Me/event-collector/listen/contact%2Ffull"}, function() {
-                lmongoclient.connect(function(collections) {
-                    mongoCollections = collections.contacts;
+                lmongoclient.connect(function(mongo) {
+                    mongoCollections = mongo.collections.contacts;
                     contacts.init("", mongoCollections);
                     dataStore.init(mongoCollections);
                     dataStore.clear();
@@ -168,8 +151,8 @@ suite.next().suite.addBatch({
         },
         "successfully" : function(err, resp) {
             assert.isNull(err);
-            assert.isTrue(shallowCompare(friend.accounts.foursquare, resp.accounts.foursquare));
-            assert.isFalse(shallowCompare(resp, friend));
+            assert.deepEqual(friend.accounts.foursquare, resp.accounts.foursquare);
+            assert.notDeepEqual(resp, friend);
         }
     }
 }).addBatch({
@@ -180,42 +163,60 @@ suite.next().suite.addBatch({
             fakeweb.allowNetConnect = true;
             process.chdir('../..');
             assert.equal(process.cwd(), currentDir);
-            assert.equal(events, 9);
+            assert.equal(events, 17);
         }
     }
 }).addBatch({
-    // TODO: this should all be going through the actual events system, this is a pretty fragile test currently
-    //
-    "Posting an event to the contacts collection" : {
+    "Foursquare ADD event" : {
         topic: function() {
             dataStore.clear();
-            var self = this;
-            request.post({
-                url:lconfig.lockerBase + mePath + "/events",
-                json:{"obj":{"source":"friends","type":"add","data": data},"_via":["foursquare"]}}, self.callback);
-        },
-        "returns a 200" : function (err, res, body) {
-            assert.equal(res.statusCode, 200);
-        },
-        "and verify that my data arrived" : {
-            topic: function() {
-                mongoCollections.findOne({'accounts.foursquare.data.contact.twitter':'ww'}, this.callback);
-            },
-            "successfully" : function(err, resp) {
-                assert.isNull(err);
-                assert.equal(resp.accounts.foursquare[0].data.id, 18387)
-            },
-            "and an event" : {
-                topic: function() {
-                    request.get({url:lconfig.lockerBase + "/Me/event-collector/getEvents/contacts"}, this.callback);
-                },
-                "was generated" : function(err, resp, data) {
-                    assert.isNull(err);
-                    assert.equal(data, 1);
-                }
-            }
+            dataStore.addEvent(JSON.parse(foursquareEvent1), this.callback); },
+        "is handled properly" : function(err, object) {
+            assert.equal(object.type, 'new');
+            assert.equal(object.data.name, 'Jacob Mitchell');
         }
     }
-})
+}).addBatch({
+    "Foursquare UPDATE event" : {
+        topic: function() {
+            dataStore.addEvent(JSON.parse(foursquareEvent2), this.callback); },
+        "is handled properly" : function(err, object) {
+            assert.equal(object.type, 'update');
+            assert.equal(object.data.name, 'Jake Mitchell');
+        }
+    }
+}).addBatch({
+    "Foursquare DELETE event" : {
+        topic: function() {
+            dataStore.addEvent(JSON.parse(foursquareEvent3), this.callback); },
+        "is handled properly" : function(err, object) {
+            // currently not doing anything with delete events, just letting things linger in the collection
+            assert.equal(object, undefined);
+        }
+    }
+}).addBatch({
+    "Github ADD event with matching email" : {
+        topic: function() {
+            dataStore.addEvent(JSON.parse('{"obj":{"source":"followers","type":"add","data":{"gravatar_id":"27e803a71a7774a00d14274def33f92c","company":"Focus.com","name":"James Burkhart","created_at":"2009/07/05 18:16:40 -0700","location":"San Francisco","public_repo_count":4,"public_gist_count":7,"blog":"www.jamesburkhart.com","following_count":8,"id":101964,"type":"User","permission":null,"followers_count":2,"login":"fourk","email":"fake@testdata.com"}},"_via":["github"]}'), this.callback); },
+        "updates to the same account": function(err, object) {
+            assert.equal(object.data.accounts.foursquare[0].data.id, 2715557);
+            assert.equal(object.data.accounts.foursquare[0].data.name, 'Jake Mitchell');
+            assert.equal(object.data.name, 'James Burkhart');
+            assert.equal(object.data.accounts.github[0].data.name, 'James Burkhart');
+        }
+    }
+}).addBatch({
+    "Google Contacts ADD event with matching email" : {
+        topic: function() {
+            dataStore.addEvent(JSON.parse('{"obj":{"type":"update","data":{"id":"29a2af0a88d07f","name":"Jeremie Miller","updated":1262741637890,"email":[{"value":"fake@testdata.com"}],"groups":["67a7891b7cdf1a8a","3199e3868a10dd45"]}},"_via":["gcontacts"]}'), this.callback); },
+        "updates to the same account": function(err, object) {
+            assert.equal(object.data.accounts.foursquare[0].data.id, 2715557);
+            assert.equal(object.data.accounts.foursquare[0].data.name, 'Jake Mitchell');
+            assert.equal(object.data.name, 'Jeremie Miller');
+            assert.equal(object.data.accounts.github[0].data.name, 'James Burkhart');
+            assert.equal(object.data.accounts.googleContacts[0].data.name, 'Jeremie Miller');
+        }
+    }
+});
         
 suite.export(module);

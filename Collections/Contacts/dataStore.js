@@ -20,6 +20,50 @@ exports.getAll = function(callback) {
     collection.find({}, callback);
 }
 
+exports.addEvent = function(eventBody, callback) {
+    var target;
+        
+    switch (eventBody._via[0]) {
+        case 'foursquare':
+            target = exports.addFoursquareData;
+            break;
+        case 'facebook':
+            target = exports.addFacebookData;
+            break;
+        case 'twitter':
+            target = exports.addTwitterData;
+            break;
+        case 'github':
+            if(eventBody.obj.source !== 'watcher')
+                target = exports.addGithubData;
+            break;
+        case 'gcontacts':
+            target = exports.addGoogleContactsData;
+            break;
+    }
+    if(!target) {
+        callback('event received could not be processed by the contacts collection');
+        return;
+    }
+    switch (eventBody.obj.type) {
+        // what do we want to do for a delete event?
+        //
+        case 'delete':
+            return callback();
+            break;
+        default:
+            target(eventBody.obj, function(err, doc) {
+                // what event should this be?
+                // also, should the source be what initiated the change, or just contacts?  putting contacts for now.
+                //
+                // var eventObj = {source: req.body.obj._via, type:req.body.obj.type, data:doc};
+                var eventObj = {source: "contacts", type:eventBody.obj.type, data:doc};
+                return callback(undefined, eventObj);
+            });
+            break;
+    }
+}
+
 exports.addData = function(type, endpoint, data, callback) {
     if (type == 'facebook') {
         exports.addFacebookData(data, callback);
@@ -64,7 +108,7 @@ exports.addTwitterData = function(relationship, twitterData, callback) {
     if(data.location)
         addToSet.nicknames = data.screen_name;
     collection.findAndModify(query, [['_id','asc']], {$set: set, $addToSet:addToSet},
-                        {safe:true}, function(err, doc) {
+                        {safe:true, new: true}, function(err, doc) {
         if(!doc) {
             //match otherwise
             var or = [{'accounts.foursquare.data.contact.twitter':twitterData.data.screen_name}];
@@ -76,7 +120,7 @@ exports.addTwitterData = function(relationship, twitterData, callback) {
             collection.findAndModify({$or:or}, [['_id','asc']], {$push:{'accounts.twitter':baseObj}, 
                                          $addToSet:addToSet,
                                          $set:set}, 
-                        {safe:true, upsert:true}, callback);
+                        {safe:true, upsert:true, new: true}, callback);
         } else {
             callback(err, doc);
         }
@@ -113,7 +157,7 @@ exports.addGithubData = function(relationship, gitHubData, callback) {
     if(data.gravatar_id)
         addToSet.photos = 'https://secure.gravatar.com/avatar/' + data.gravatar_id;
     collection.findAndModify(query, [['_id','asc']], {$set: set, $addToSet:addToSet},
-                        {safe:true}, function(err, doc) {
+                        {safe:true, new: true}, function(err, doc) {
         if(!doc) {
             //match otherwise, first entry is just to ensure we never match on nothing
             var or = [{'accounts.github.data.id':data.id}];
@@ -127,7 +171,7 @@ exports.addGithubData = function(relationship, gitHubData, callback) {
             collection.findAndModify({$or:or}, [['_id','asc']], {$push:{'accounts.github':baseObj}, 
                                          $addToSet:addToSet,
                                          $set:set}, 
-                        {safe:true, upsert:true}, callback);
+                        {safe:true, upsert:true, new: true}, callback);
         } else {
             callback(err, doc);
         }
@@ -165,7 +209,7 @@ exports.addFoursquareData = function(foursquareData, callback) {
     if(data.homeCity)
         addToSet.addresses = {type:'location', value:data.homeCity};
     collection.findAndModify(query, [['_id','asc']], {$set: set, $addToSet:addToSet},
-                             {safe: true}, function(err, doc) {
+                             {safe: true, new: true}, function(err, doc) {
         if (!doc) {
             var or = [{'accounts.foursquare.data.id':foursquareID}];
             if(cleanedName)
@@ -182,7 +226,7 @@ exports.addFoursquareData = function(foursquareData, callback) {
             collection.findAndModify({$or:or}, [['_id','asc']], {$push:{'accounts.foursquare':baseObj}, 
                                          $addToSet:addToSet,
                                          $set:set},
-                              {safe: true, upsert: true}, callback);
+                              {safe: true, upsert: true, new: true}, callback);
         } else {
             callback(err, doc);
         }
@@ -208,7 +252,7 @@ exports.addFacebookData = function(facebookData, callback) {
     if(data.id)
         addToSet.photos = 'https://graph.facebook.com/' + data.id + '/picture';
     collection.findAndModify(query, [['_id','asc']], {$set: set, $addToSet:addToSet},
-                        {safe:true}, function(err, doc) {
+                        {safe:true, new: true}, function(err, doc) {
         if(!doc) {
             //match otherwise
             var or = [{'accounts.foursquare.data.contact.facebook':fbID}];
@@ -221,7 +265,7 @@ exports.addFacebookData = function(facebookData, callback) {
             collection.findAndModify({$or:or}, [['_id','asc']], {$push:{'accounts.facebook':baseObj}, 
                                          $addToSet:addToSet,
                                          $set:set}, 
-                        {safe:true, upsert:true}, callback);
+                        {safe:true, upsert:true, new: true}, callback);
         } else {
             callback(err, doc);
         }
@@ -265,9 +309,9 @@ exports.addGoogleContactsData = function(googleContactsData, callback) {
         }
         addToSet.phoneNumbers = {$each:phones};
     }
+    var emails = [];
     //emails
     if(data.email) {
-        var emails = [];
         for(var i in data.email) {
             if(!(data.email[i] && data.email[i].value))
                 continue;
@@ -277,19 +321,24 @@ exports.addGoogleContactsData = function(googleContactsData, callback) {
         addToSet.emails = {$each:emails};
     }
     collection.findAndModify(query, [['_id','asc']], {$set: set, $addToSet:addToSet},
-                       {safe:true}, function(err, doc) {
+                       {safe:true, new: true}, function(err, doc) {
         if(!doc) {
             //match otherwise
             var or = [{'accounts.googleContacts.data.id':gcID}];
             if(cleanedName)
                 or.push({'_matching.cleanedNames':cleanedName});
+            if (emails) {
+                for (var i in emails) {
+                    or.push({'emails.value' : emails[i].value});
+                }
+            }
             var set = {};
             if(data.name)
                 set.name = data.name;
             collection.findAndModify({$or:or}, [['_id','asc']], {$push:{'accounts.googleContacts':baseObj}, 
                                          $addToSet:addToSet,
                                          $set:set}, 
-                        {safe:true, upsert:true}, callback);
+                        {safe:true, upsert:true, new: true}, callback);
         } else {
             callback(err, doc);
         }

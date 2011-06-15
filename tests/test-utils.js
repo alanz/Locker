@@ -17,7 +17,7 @@ var request = require('request');
 exports.timeoutAsyncCallback = function(timeout, startCallback, runCallback) {
     var context = {
         topic: function (topic) {
-            var emitter = new(events.EventEmitter)
+            var emitter = new events.EventEmitter();
             var fired = false;
             startCallback(topic, timeout, function() {
                 if (runCallback) {
@@ -46,7 +46,7 @@ exports.timeoutAsyncCallback = function(timeout, startCallback, runCallback) {
 
 //checks to ensure a list of paths all exist
 exports.checkFiles = function(paths, callback) {
-    if(!paths || paths.length == 0) {
+    if(!paths || paths.length === 0) {
         callback();
         return;
     } else {
@@ -106,7 +106,7 @@ exports.waitForFileToComplete = function(path, expectedSize, retries, timeout,  
 
 //wait for event response, count the number of responses
 exports.waitForEvents = function (url, retries, timeout, expectedResponses, value, callback) {
-    if (retries == 0) {
+    if (retries === 0) {
         return callback(null, value);
     }
     if (expectedResponses === value.length) {
@@ -118,4 +118,35 @@ exports.waitForEvents = function (url, retries, timeout, expectedResponses, valu
             exports.waitForEvents(url, retries, timeout, expectedResponses, JSON.parse(data), callback); 
         });
     }, timeout);
+}
+
+require.paths.push(__dirname + "/../Common/node");
+var EventEmitter = require('events').EventEmitter;
+exports.eventEmitter = new EventEmitter();
+
+var lservicemanager = require('lservicemanager');
+var locker = require('locker');
+var levents = require('levents');
+var oldFuncs = {};
+
+// types is an array of the event types to listen for
+exports.hijackEvents = function (types, svcId) {
+    
+    lservicemanager.isRunning = function() { return true; };
+    lservicemanager.isInstalled = function() { return true; };
+    lservicemanager.metaInfo = function() { return { uriLocal: 'http://testing:80/' }; };
+    locker.makeRequest = function(httpOpts, body) {
+        exports.eventEmitter.emit('event', body);
+    }
+    
+    for (var i = 0; i < types.length; i++) {
+        levents.addListener(types[i], svcId, 'https://testing:80/');
+    }
+}
+
+exports.tearDown = function() {
+    lservicemanager.isRunning = oldFuncs.isRunning;
+    lservicemanager.isInstalled = oldFuncs.isInstalled;
+    lservicemanager.metaInfo = oldFuncs.metaInfo;
+    locker.makeRequest = oldFuncs.makeRequest;
 }

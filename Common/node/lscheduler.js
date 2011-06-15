@@ -20,7 +20,7 @@ SCHEDULE_ACTION_URI = 1; // Indirect service URIs, savable
 
 exports.Scheduler = function() {
     this.scheduledActions = [];
-    this.filename = "scheduler.json";
+    this.filename = "Me/scheduler.json";
 };
 
 exports.Scheduler.prototype.loadAndStart = function() {
@@ -73,7 +73,7 @@ exports.Scheduler.prototype.scheduleInternal = function(atTime, callback) {
     if (typeof(atTime) == "number") {
         runTime = new Date;
         runTime.setTime(runTime.getTime() + atTime);
-        atTime = runTime
+        atTime = runTime;
     }
     var trackingInfo = {
         at:atTime,

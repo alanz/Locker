@@ -11,7 +11,7 @@ var fs = require('fs'),
     lfs = require('../../Common/node/lfs.js'),
     request = require('request'),
     dataStore = require('../../Common/node/connector/dataStore'),
-    shallowCompare = require('../../Common/node/shallowCompare'),
+    deepCompare = require('../../Common/node/deepCompare'),
     utils = require('../../Common/node/connector/utils'),
     app = require('../../Common/node/connector/api'),
     EventEmitter = require('events').EventEmitter;
@@ -21,7 +21,7 @@ var updateState, auth, allKnownIDs;
 
 exports.eventEmitter = new EventEmitter();
 
-exports.init = function(theauth, mongoCollections) {
+exports.init = function(theauth, mongo) {
     auth = theauth;
     try {
         updateState = JSON.parse(fs.readFileSync('updateState.json'));
@@ -30,7 +30,7 @@ exports.init = function(theauth, mongoCollections) {
     try {
         allKnownIDs = JSON.parse(fs.readFileSync('allKnownIDs.json'));
     } catch (err) { allKnownIDs = []; }
-    dataStore.init("id", mongoCollections);
+    dataStore.init("id", mongo);
 }
 
 
@@ -80,9 +80,9 @@ function logRemoved(ids, callback) {
     var id = ids.shift();
     dataStore.removeObject("friends", id+'', function(err) {
         delete allKnownIDs[id];
-        logRemoved(ids, callback);
         var eventObj = {source:"friends", type:'delete', data:{id:id, deleted:true}};
         exports.eventEmitter.emit('contact/foursquare', eventObj);
+        logRemoved(ids, callback);
     });
 }
 
@@ -93,7 +93,7 @@ exports.syncCheckins = function (callback) {
         getCheckins(self.id, auth.accessToken, 0, function(err, checkins) {
             var checkinCount = checkins.length;
             addCheckins(checkins, function() {
-                callback(err, 600, "sync'd " + checkinCount + " new checkins");
+                callback(err, 600, "sync'd " + checkinCount + " new my checkins");
             });
         });
     });
@@ -117,6 +117,33 @@ function getMe(token, callback) {
     request.get({uri:'https://api.foursquare.com/v2/users/self.json?oauth_token=' + token}, callback);
 }
 
+exports.syncRecent = function (callback) {
+    getRecent(auth.accessToken, function(err, resp, data) {
+        var checkins = JSON.parse(data).response.recent;
+        var checkinCount = checkins.length;
+        addRecent(checkins, function() {
+            callback(err, 600, "sync'd " + checkinCount + " new friend's checkins");
+        });
+    });
+}
+
+function addRecent(checkins, callback) {
+    if (!checkins || !checkins.length) {
+        callback();
+    }
+    var checkin = checkins.shift();
+    if (checkin != undefined) {
+        dataStore.addObject("recent", checkin, function(err) {
+            var eventObj = {source:'recent', type:'new', status:checkin};
+            exports.eventEmitter.emit('checkin/foursquare', eventObj);
+            addRecent(checkins, callback);
+        })
+    }
+}
+
+function getRecent(token, callback) {
+    request.get({uri:'https://api.foursquare.com/v2/checkins/recent.json?limit=100&oauth_token=' + token}, callback);
+}
 
 var checkins_limit = 250;
 function getCheckins(userID, token, offset, callback, checkins) {
@@ -199,7 +226,7 @@ function downloadUsers(users, token, callback) {
                         var eventObj = {};
                         if (resp) {
                             delete resp['_id'];
-                            if (shallowCompare(js, resp)) {
+                            if (deepCompare(js, resp)) {
                                 return parseUser();
                             }
                             eventObj = {source:'friends', type:'update', data:js};

@@ -8,18 +8,18 @@
 */
 
 var fs = require('fs'),
-    lfs = require("../lfs.js"),
-    dataStore = require('./dataStore.js'),
+    lfs = require("lfs"),
+    dataStore = require('connector/dataStore'),
     validTypes = [];
 
 
-module.exports = function(app, id, theMongoCollections) {
+module.exports = function(app, id, mongo) {
 
-for (var i in theMongoCollections) {
+for (var i in mongo.collections) {
     validTypes.push(i);
 }
 
-dataStore.init(id, theMongoCollections);
+dataStore.init(id, mongo);
 
 // In adherence with the contact/* provider API
 // Returns a list of the current set of friends or followers
