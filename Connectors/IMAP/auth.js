@@ -12,15 +12,15 @@ var request = require('request'),
     lcrypto = require("../../Common/node/lcrypto"),
     fs = require('fs');
 
-var completedCallback, me;
+var completedCallback, uri;
 
 lcrypto.loadKeys();
 
 exports.auth = {};
 
-exports.authAndRun = function(app, onCompletedCallback) {
-    me = app.meData;
-
+exports.authAndRun = function(app, externalUrl, onCompletedCallback) {
+    uri = externalUrl
+    
     if(exports.isAuthed()) {
         onCompletedCallback();
         return;
@@ -64,14 +64,14 @@ function go(req, res) {
                 "<form method='post' action='saveAuth'>" + 
                     "Username: <input name='username'><br>" +
                     "Password: <input type='password' name='password'><br>" +
-                    "Host: <input name='host'><br>" +
+                    "Host: <input name='host' value='imap.gmail.com'><br>" +
                     "Port: <input name='port' value='993'><br>" +
                     "Host uses SSL: <input type='checkbox' name='secure' checked='checked' value='true'><br>" +
                     "<input type='submit' value='Save'>" +
                 "</form></html>");
     } else {
-        sys.debug('redirecting to ' + me.uri);
-        res.redirect(me.uri);
+        sys.debug('redirecting to ' + uri);
+        res.redirect(uri);
     }
 }
 
@@ -92,5 +92,5 @@ function saveAuth(req, res) {
     exports.auth.username = req.param('username');
     exports.auth.password = req.param('password');
     completedCallback(exports.auth);
-    res.redirect(me.uri);
+    res.redirect(uri);
 }

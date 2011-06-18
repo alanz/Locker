@@ -12,8 +12,8 @@ var express = require('express'),
     locker = require('locker'),
     lfs = require('lfs');
 
-exports.init = function (processOptions)
-{
+// run callback to pass the express app object right before the listen() happens
+exports.init = function (processOptions, callback) {
     var started = false;
     var app;
     if(!processOptions) processOptions = {};
@@ -46,7 +46,7 @@ exports.init = function (processOptions)
         app.meData = lfs.loadMeData();
         locker.connectToMongo(function(mongo) {
             require("connector/api")(app, mongoId, mongo);
-            authLib.authAndRun(app, function() {
+            authLib.authAndRun(app, processInfo.externalBase, function() {
                 syncApi.authComplete(authLib.auth, mongo);
                 if (!started) {
                     startWebServer();
@@ -58,6 +58,7 @@ exports.init = function (processOptions)
             function startWebServer() {
                 started = true;
                 // Start the core web server
+                if(callback) callback(app);
                 app.listen(processInfo.port, function() {
                     // Tell the locker core that we're done
                     var returnedInfo = {port: processInfo.port};
