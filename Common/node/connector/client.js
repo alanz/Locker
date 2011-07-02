@@ -46,6 +46,7 @@ exports.init = function (processOptions, callback) {
         app.meData = lfs.loadMeData();
         locker.connectToMongo(function(mongo) {
             require("connector/api")(app, mongoId, mongo);
+            app.externalBase = processInfo.externalBase;
             authLib.authAndRun(app, processInfo.externalBase, function() {
                 syncApi.authComplete(authLib.auth, mongo);
                 if (!started) {
@@ -59,13 +60,13 @@ exports.init = function (processOptions, callback) {
                 started = true;
                 // Start the core web server
                 if(callback) callback(app);
-                app.listen(processInfo.port, function() {
+                app.listen(0, function() {
                     // Tell the locker core that we're done
-                    var returnedInfo = {port: processInfo.port};
+                    var returnedInfo = {port: app.address().port};
                     process.stdout.write(JSON.stringify(returnedInfo));
                 });
             }
         })
     });
-    process.stdin.resume();    
+    process.stdin.resume();
 }

@@ -13,12 +13,15 @@
 var rootHost = process.argv[2];
 var lockerPort = process.argv[3];
 var rootPort = process.argv[4];
+var externalBase = process.argv[5];
+var lockerBase = 'http://' + rootHost + ':' + lockerPort + '/core/dashboard';
+
 if (!rootHost || !rootPort) {
     process.stderr.write("missing host and port arguments\n");
     process.exit(1);
 }
 //var lockerPort = rootPort.substring(1);
-var lockerBase = 'http://'+rootHost+':'+lockerPort;
+var lockerRoot = 'http://'+rootHost+':'+lockerPort;
 
 var fs = require('fs'),
     path = require('path'),
@@ -32,13 +35,11 @@ var fs = require('fs'),
 
 var app = express.createServer();
 app.use(connect.bodyParser());
-app.use(connect.cookieParser());
-app.use(connect.session({secret : "locker"}));
 
 var map;
 app.get('/', function (req, res) {    
     res.writeHead(200, { 'Content-Type': 'text/html','Access-Control-Allow-Origin' : '*' });
-    request.get({uri:lockerBase + '/map'}, function(err, resp, body) {
+    request.get({uri:lockerRoot + '/map'}, function(err, resp, body) {
         map = JSON.parse(body);
         fs.readFile("dashboard.html", function(err, data) {
             res.write(data, "binary");
@@ -50,10 +51,11 @@ app.get('/', function (req, res) {
 app.get('/config.js', function (req, res) {    
     res.writeHead(200, { 'Content-Type': 'text/javascript','Access-Control-Allow-Origin' : '*' });
     //this might be a potential script injection attack, just sayin.
-    var config = {'lockerHost':rootHost,
-                  'lockerPort':rootPort,
-                  'lockerBase':lockerBase};
-    res.end('var config = ' + JSON.stringify(config) + ';');
+    var config = {lockerHost:rootHost,
+                  lockerPort:rootPort,
+                  lockerBase:lockerRoot,
+                  externalBase:externalBase};
+    res.end('lconfig = ' + JSON.stringify(config) + ';');
 });
 
 // doesn't this exist somewhere? was easier to write than find out, meh!
@@ -65,9 +67,13 @@ function intersect(a,b) {
     return false;
 }
 
-app.get('/post2install', function(req, res){
-    var id = parseInt(req.param('id'));
-    var js = map.available[id];
+app.get('/install', function(req, res){
+    ensureMap(function() {
+        install(req, res);
+    });
+});
+
+function install(req, res) {
     var httpClient = http.createClient(lockerPort);
     var request = httpClient.request('POST', '/core/Dashboard/install', {'Content-Type':'application/json'});
     var item = JSON.stringify(map.available[req.param('id')]);
@@ -81,17 +87,54 @@ app.get('/post2install', function(req, res){
         });
         response.on('end', function() {
             j = JSON.parse(data);
-            if(j && j.id)
-            {
-                res.redirect("/?"+Math.random()+"#!/app/"+j.id)
-            }else{
-                res.writeHead(200, { 'Content-Type': 'text/html' });
-                res.write('<a href="/">back</a><br>failed: '+data);
-                res.end();
+            if(j && j.id) {
+                res.writeHead(200, { 'Content-Type': 'application/json','Access-Control-Allow-Origin' : '*'});
+                res.end(JSON.stringify({success:j}));
+            } else {
+                res.writeHead(200, { 'Content-Type': 'application/json','Access-Control-Allow-Origin' : '*'});
+                res.end(JSON.stringify({error:j}));
             }
         });
     });
+}
+
+app.get('/uninstall', function(req, res) {
+    stopService('uninstall', req, res);
 });
+
+app.get('/enable', function(req, res){
+    stopService('enable', req, res);
+});
+
+
+app.get('/disable', function(req, res){
+    stopService('disable', req, res);
+});
+
+function stopService(method, req, res) {
+    var serviceId = req.query.serviceId;
+    request.post({uri:lockerBase + '/' + method, json:{serviceId:serviceId}}, function(err, resp, body) {
+        if(err) {
+            res.writeHead(500, {'Content-Type': 'application/json'});
+            console.error(method + ' err', err);
+            res.end(JSON.stringify({error:true}));
+        } else {
+            res.writeHead(200, {'Content-Type': 'application/json'});
+            res.end(JSON.stringify({success:true}));
+        }
+    });
+}
+
+function ensureMap(callback) {
+    if (!map || !map.available) {
+        request.get({uri:lockerBase + '/map'}, function(err, resp, body) {
+            map = JSON.parse(body);
+            callback();
+        });
+    } else {
+        process.nextTick(callback);
+    }
+}
 
 
 app.use(express.static(__dirname));

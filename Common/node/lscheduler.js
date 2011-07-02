@@ -20,7 +20,7 @@ SCHEDULE_ACTION_URI = 1; // Indirect service URIs, savable
 
 exports.Scheduler = function() {
     this.scheduledActions = [];
-    this.filename = "Me/scheduler.json";
+    this.filename = lconfig.me + "/scheduler.json";
 };
 
 exports.Scheduler.prototype.loadAndStart = function() {
@@ -33,13 +33,13 @@ exports.Scheduler.prototype.loadAndStart = function() {
 }
 
 exports.Scheduler.prototype.savePending = function() {
-    var stream = fs.createWriteStream(this.filename, {'flags':'w', 'encoding': 'utf-8'});
+    var data = "";
     for(var i = 0; i < this.scheduledActions.length; ++i) {
         if (this.scheduledActions[i].type == SCHEDULE_ACTION_URI)  {
-            stream.write(JSON.stringify(this.scheduledActions[i]) + '\n');
+            data += JSON.stringify(this.scheduledActions[i]) + '\n';
         }
     }
-    stream.end();
+    fs.writeFileSync(this.filename, data);
 }
 
 exports.Scheduler.prototype.scheduleURL = function(atTime, serviceID, callbackURL) {
@@ -51,8 +51,14 @@ exports.Scheduler.prototype.scheduleURL = function(atTime, serviceID, callbackUR
         url:callbackURL
     };
     this.scheduledActions.push(trackingInfo);
+    if (typeof(atTime) == "number") {
+        runTime = new Date;
+        runTime.setTime(runTime.getTime() + atTime);
+        atTime = runTime;
+    }
     var milliseconds = atTime.getTime() - Date.now();
     if (milliseconds < 0) milliseconds = 0;
+
     var self = this;
     function runUrl() {
         request.get({url:lconfig.lockerBase + "/Me/" + serviceID + callbackURL}, function() {
@@ -61,10 +67,15 @@ exports.Scheduler.prototype.scheduleURL = function(atTime, serviceID, callbackUR
         });
     }
     setTimeout(function() {
-        if (!serviceManager.isRunning(serviceID)) {
-            serviceManager.spawn(serviceID, runUrl);
+        if (!serviceManager.isInstalled(serviceID)) {
+            self.scheduledActions.splice(self.scheduledActions.indexOf(trackingInfo));
+            self.savePending();
         } else {
-            runUrl();
+            if (!serviceManager.isRunning(serviceID)) {
+                serviceManager.spawn(serviceID, runUrl);
+            } else {
+                runUrl();
+            }
         }
     }, milliseconds);
 }

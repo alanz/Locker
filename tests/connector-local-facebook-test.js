@@ -11,7 +11,7 @@
 var mongoCollections;
 var currentDir = process.cwd();
 var svcId = 'facebook';
-var mePath = '/Me/' + svcId;
+var mePath = '/Data/' + svcId;
 var thecollections = ['friends', 'newsfeed', 'wall'];
 process.on('uncaughtException',function(error){
     sys.puts(error.stack);
@@ -32,6 +32,7 @@ var lmongoclient = require('../Common/node/lmongoclient.js')(lconfig.mongo.host,
 var locker = require('../Common/node/locker');
 var levents = require('../Common/node/levents');
 var emittedEvents = [];
+var fs = require('fs');
 
 sync.eventEmitter.on('contact/facebook', function(eventObj) {
     levents.fireEvent('contact/facebook', 'facebook-test', eventObj);
@@ -64,6 +65,10 @@ suite.next().suite.addBatch({
 }).addBatch({
     "Can get friends" : {
         topic: function() {
+            fakeweb.registerUri({
+                uri : 'https://graph.facebook.com/100002438955325/picture?access_token=abc',
+                file : __dirname + '/fixtures/facebook/photo.gif',
+                contentType : 'image/gif' });
             fakeweb.registerUri({
                 uri : 'https://graph.facebook.com/me?access_token=abc&date_format=U',
                 file : __dirname + '/fixtures/facebook/me.json' });
@@ -220,7 +225,7 @@ suite.next().suite.addBatch({
 suite.next().use(lconfig.lockerHost, lconfig.lockerPort)
     .discuss("Facebook connector")
         .discuss("all contacts")
-            .path(mePath + "/getCurrent/friends")
+            .path("/Me/" + svcId + "/getCurrent/friends")
             .get()
                 .expect('returns contacts', function(err, res, body) {
                     assert.isNull(err);
@@ -231,7 +236,7 @@ suite.next().use(lconfig.lockerHost, lconfig.lockerPort)
             .unpath()
         .undiscuss()
         .discuss("all newsfeed posts")
-            .path(mePath + "/getCurrent/newsfeed")
+            .path("/Me/" + svcId + "/getCurrent/newsfeed")
             .get()
                 .expect('returns newsfeed', function(err, res, body) {
                     assert.isNull(err);
@@ -242,7 +247,7 @@ suite.next().use(lconfig.lockerHost, lconfig.lockerPort)
             .unpath()
         .undiscuss()
         .discuss("all wall posts")
-            .path(mePath + "/getCurrent/wall")
+            .path("/Me/" + svcId + "/getCurrent/wall")
             .get()
                 .expect('returns wall', function(err, res, body) {
                     assert.isNull(err);
@@ -253,13 +258,23 @@ suite.next().use(lconfig.lockerHost, lconfig.lockerPort)
             .unpath()
         .undiscuss()
         .discuss("get profile")
-            .path(mePath + "/get_profile")
+            .path("/Me/" + svcId + "/get_profile")
             .get()
                 .expect("returns the user's profile", function(err, res, body) {
                     assert.isNull(err);
                     var profile = JSON.parse(body);
                     assert.isNotNull(profile);
                     assert.equal(profile.id, '100002438955325'); 
+                })
+            .unpath()
+        .discuss("get photo")
+            .path("/Me/" + svcId + "/getPhoto/100002438955325")
+            .get()
+                .expect("returns a photo", function(err, res, body) {
+                    assert.isNull(err);
+                    assert.equal(res.statusCode, 200);
+                    var me = fs.readFileSync('./fixtures/facebook/photo.gif');
+                    assert.equal(body, me);
                 })
             .unpath()
         .undiscuss();
