@@ -8,9 +8,12 @@
 */
 
 // merge contacts from connectors
+require.paths.push(__dirname + "/../../Common/node");
+var lconfig = require('lconfig');
+lconfig.load('../../config.json');
 
 var fs = require('fs'),
-    locker = require('../../Common/node/locker.js');
+    locker = require('locker.js');
     
 var sync = require('./sync');
 var dataStore = require("./dataStore");
@@ -28,6 +31,16 @@ app.get('/', function(req, res) {
     });
     dataStore.getTotalCount(function(err, countInfo) {
         res.write('<html><p>Found '+ countInfo +' contacts</p><a href="update">refresh from connectors</a></html>');
+        res.end();
+    });
+});
+
+app.get('/state', function(req, res) {
+    res.writeHead(200, {
+        'Content-Type': 'application/json'
+    });
+    dataStore.getTotalCount(function(err, countInfo) {
+        res.write('{"updated":'+new Date().getTime()+',"ready":1,"count":'+ countInfo +'}');
         res.end();
     });
 });
@@ -63,6 +76,7 @@ app.post('/events', function(req, res) {
             res.end(err);
         } else {
             if (eventObj) {
+                
                 locker.event("contact/full", eventObj);
             }
             res.writeHead(200);
@@ -76,7 +90,7 @@ process.stdin.resume();
 process.stdin.on('data', function(data) {
     lockerInfo = JSON.parse(data);
     locker.initClient(lockerInfo);
-    if (!lockerInfo || !lockerInfo['workingDirectory']) {
+    if (!lockerInfo || !lockerInfo.workingDirectory) {
         process.stderr.write('Was not passed valid startup information.'+data+'\n');
         process.exit(1);
     }
@@ -87,7 +101,7 @@ process.stdin.on('data', function(data) {
         app.listen(lockerInfo.port, 'localhost', function() {
             process.stdout.write(data);
             sync.eventEmitter.on('contact/full', function(eventObj) {
-                locker.event('contact/full', eventObj);
+                locker.event('contact/full', eventObj);     
             });
             // gatherContacts();
         });

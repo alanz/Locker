@@ -75,16 +75,20 @@ function mapMetaData(file, type, installable) {
             return;
         }
         if (metaData.status != 'stub') {
-            fs.stat(lconfig.lockerDir+"/" + lconfig.me + "/"+metaData.handle,function(err,stat){
-                if(err || !stat) {
-                    metaData.id=metaData.handle;
-                    metaData.uri = lconfig.lockerBase+"/Me/"+metaData.id+"/";
-                    metaData.externalUri = lconfig.externalBase+"/Me/"+metaData.id+"/";
-                    serviceMap.installed[metaData.id] = metaData;
-                    fs.mkdirSync(lconfig.lockerDir + "/" + lconfig.me + "/"+metaData.id,0755);
-                    fs.writeFileSync(lconfig.lockerDir + "/" + lconfig.me + "/"+metaData.id+'/me.json',JSON.stringify(metaData, null, 4));
-                }
-            });
+            var err = false;
+            try {
+                var stat = fs.statSync(lconfig.lockerDir+"/" + lconfig.me + "/"+metaData.handle);
+            } catch (E) {
+                err = true
+            }
+            if(err || !stat) {
+                metaData.id=metaData.handle;
+                metaData.uri = lconfig.lockerBase+"/Me/"+metaData.id+"/";
+                metaData.externalUri = lconfig.externalBase+"/Me/"+metaData.id+"/";
+                serviceMap.installed[metaData.id] = metaData;
+                fs.mkdirSync(lconfig.lockerDir + "/" + lconfig.me + "/"+metaData.id,0755);
+                fs.writeFileSync(lconfig.lockerDir + "/" + lconfig.me + "/"+metaData.id+'/me.json',JSON.stringify(metaData, null, 4));
+            }
         }
     }
 
@@ -133,15 +137,17 @@ exports.findInstalled = function () {
             if(!fs.statSync(dir).isDirectory()) continue;
             if(!fs.statSync(dir+'/me.json').isFile()) continue;
             var js = JSON.parse(fs.readFileSync(dir+'/me.json', 'utf-8'));
-            delete js.pid;
-            delete js.starting;
-            js.externalUri = lconfig.externalBase+"/Me/"+js.id+"/";
-            exports.migrate(dir, js);
-            addEvents(js);
-            console.log("Loaded " + js.id);
-            serviceMap.installed[js.id] = js;
-            if (js.disabled) {
-                serviceMap.disabled.push(js.id);
+            if (!js.synclets) {
+                delete js.pid;
+                delete js.starting;
+                js.externalUri = lconfig.externalBase+"/Me/"+js.id+"/";
+                exports.migrate(dir, js);
+                addEvents(js);
+                console.log("Loaded " + js.id);
+                serviceMap.installed[js.id] = js;
+                if (js.disabled) {
+                    serviceMap.disabled.push(js.id);
+                }
             }
         } catch (E) {
 //            console.log("Me/"+dirs[i]+" does not appear to be a service (" +E+ ")");

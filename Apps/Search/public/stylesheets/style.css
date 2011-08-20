@@ -52,8 +52,6 @@
 body
 {
   font-family: "Lucida Grande", "Lucida Sans Unicode", "Lucida Sans", Geneva, Verdana, sans-serif;
-  -webkit-user-select: none;
-  -moz-user-select: none;
 }
 h1 {
   margin: 0;
@@ -125,4 +123,8 @@ h1 {
 
 .button:active a {
   color: white;
+}
+
+.typeSelector {
+    font-size: 2.0em;
 }

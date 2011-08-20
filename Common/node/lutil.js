@@ -62,7 +62,7 @@ exports.extend = function() {
           var clone = src && (isPlainObject(src) || Array.isArray(src)) ? src : Array.isArray(copy) ? [] : {};
 
           // Never move original objects, clone them
-          target[name] = extend(deep, clone, copy);
+          target[name] = exports.extend(deep, clone, copy);
 
         // Don't bring in undefined values
         } else if (typeof copy !== "undefined")
@@ -74,3 +74,16 @@ exports.extend = function() {
   // Return the modified object
   return target;
 };
+
+// Found on http://bonsaiden.github.com/JavaScript-Garden/#types.typeof
+exports.is = function(type, obj) {
+    var clas = Object.prototype.toString.call(obj).slice(8, -1);
+    return obj !== undefined && obj !== null && clas === type;
+}
+
+exports.addAll = function(thisArray, anotherArray) {
+    if(!(thisArray && anotherArray && anotherArray.length))
+        return;
+    for(var i = 0; i < anotherArray.length; i++)
+        thisArray.push(anotherArray[i]);
+}

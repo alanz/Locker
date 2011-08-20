@@ -7,19 +7,18 @@
 *
 */
 
-require.paths.push(__dirname + '/node_modules');
-
 var fs = require('fs'),
     http = require('http'),
     url = require('url');
     
-var express = require('./node_modules/express'),
+var express = require('express'),
     app = express.createServer();
     
 var locker = require('locker'),
     lconfig = require('lconfig'),
-    search = require('./lib/elasticsearch/index.js');
+//  search = require('./lib/elasticsearch/index.js');
 //  search = require('./lib/clucene/index.js');
+    search = require('./lib/lockersearch/index.js');
     
 
 // Config
@@ -43,29 +42,40 @@ app.configure('production', function(){
   app.use(express.errorHandler()); 
 });
 
+var me;
 
 // Routes
 app.get('/',
 function(req, res) {
-  console.log(res);
+    me = fs.readFileSync('me.json');
+    me = JSON.parse(me);
+    
     res.render('index', {
-      error: null
+      error: null,
+      homePath: '/Me/' + me.id,
+      searchPath: '/Me/' + me.id + '/search'
     });
 });
 
 app.post('/search',
 function(req, res) {
+    me = fs.readFileSync('me.json');
+    me = JSON.parse(me);
+    
     var term = sanitize(req.param('searchterm'));
+    var type = sanitize(req.param('type'));
     var results = [];
     var error = null;
     
-    search.search('contacts', term, 0, 10, function(err, results) {
+    search.search(type, term, 0, 10, function(err, results) {
       if (err) {
         console.error(err);
         error = err;
       }
+      
       res.render('search', {
         term: term,
+        homePath: '/Me/' + me.id,
         results: results.hits.hits,
         took: results.took,
         total: results.hits.total,
@@ -77,17 +87,35 @@ function(req, res) {
 
 app.get('/indexContacts',
 function(req, res) {
-    indexCollectionRecordsOfType('contacts', '/Me/contacts/allContacts');
+    indexCollectionRecordsOfType('contacts', '/Me/contacts/allContacts', function(err, results) {
+      if (err) {
+        res.end('Error when attempting to index');
+      } else {
+        res.end('Indexed ' + results.count + ' contacts');
+      }
+    });
 });
 
 app.get('/indexLinks',
 function(req, res) {
-    indexCollectionRecordsOfType('links', '/Me/links/allLinks');
+    indexCollectionRecordsOfType('links', '/Me/links/allLinks', function(err, results) {
+      if (err) {
+        res.end('Error when attempting to index');
+      } else {
+        res.end('Indexed ' + results.count + ' links');
+      }
+    });
 });
 
 app.get('/indexMessages',
 function(req, res) {
-    indexCollectionRecordsOfType('messages', '/Me/messages/allMessages');
+    indexCollectionRecordsOfType('messages', '/Me/messages/allMessages', function(err, results) {
+      if (err) {
+        res.end('Error when attempting to index');
+      } else {
+        res.end('Indexed ' + results.count + ' messages');
+      }
+    });
 });
 
 // quick/dirty sanitization ripped from the Jade template engine
@@ -99,7 +127,7 @@ function sanitize(term){
         .replace(/"/g, '&quot;');
 }
 
-function indexCollectionRecordsOfType(type, urlPath) {
+function indexCollectionRecordsOfType(type, urlPath, callback) {
 
   var lockerUrl = url.parse(processInfo.lockerUrl);
   var options = {
@@ -126,6 +154,7 @@ function indexCollectionRecordsOfType(type, urlPath) {
         search.index(results[i]._id, type, results[i], function(err, result) {
           if (err) {
             console.log('error indexing ' + type + ' with ID of ' + results[i]._id);
+            callback(err);
           }
         });
       }
@@ -141,13 +170,18 @@ var stdin = process.openStdin();
 var processInfo;
 
 stdin.setEncoding('utf8');
-stdin.on('data', function (chunk) {
-    processInfo = JSON.parse(chunk);
-    locker.initClient(processInfo);
-    process.chdir(processInfo.workingDirectory);
-    app.listen(processInfo.port, function() {
-        var returnedInfo = {port: processInfo.port};
-        process.stdout.write(JSON.stringify(returnedInfo));
-    });
+var allData = "";
+process.stdin.on('data', function(data) {
+    allData += data;
+    if (allData.indexOf("\n") > 0) {
+        data = allData.substr(0, allData.indexOf("\n"));
+        processInfo = JSON.parse(data);
+        locker.initClient(processInfo);
+        process.chdir(processInfo.workingDirectory);
+        app.listen(processInfo.port, function() {
+            var returnedInfo = {port: processInfo.port};
+            process.stdout.write(JSON.stringify(returnedInfo));
+        });
+    }
 });
 stdin.resume();

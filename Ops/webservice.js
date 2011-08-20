@@ -12,12 +12,15 @@ var http = require('http');
 var request = require('request');
 var lscheduler = require("lscheduler");
 var levents = require("levents");
+var lutil = require('lutil');
 var serviceManager = require("lservicemanager");
+var syncManager = require('lsyncmanager');
 var dashboard = require(__dirname + "/dashboard.js");
 var express = require('express');
 var connect = require('connect');
 var request = require('request');
 var sys = require('sys');
+var path = require('path');
 var fs = require("fs");
 var url = require('url');
 var lfs = require(__dirname + "/../Common/node/lfs.js");
@@ -38,9 +41,20 @@ var locker = express.createServer(
                 } else {
                     next();
                 }
-            }
-            );
+            },
+            function(req, res, next) {
+                if (req.url.substring(0, 13) == '/auth/twitter') {
+                    connect.bodyParser()(req, res, next);
+                } else {
+                    next();
+                }
+            },
+            connect.cookieParser(),
+            connect.session({key:'locker.project.id', secret : "locker"})
+        );
 
+var synclets = require('./webservice-synclets')(locker);
+var syncletAuth = require('./webservice-synclets-auth')(locker);
 
 var listeners = new Object(); // listeners for events
 
@@ -61,7 +75,10 @@ locker.get("/providers", function(req, res) {
         return;
     }
     res.writeHead(200, {"Content-Type":"application/json"});
-    res.end(JSON.stringify(serviceManager.providers(req.param("types").split(","))));
+    var services = serviceManager.providers(req.param('types').split(','));
+    var synclets = syncManager.providers(req.param('types').split(','));
+    lutil.addAll(services, synclets);
+    res.end(JSON.stringify(services));
 });
 
 locker.get("/encrypt", function(req, res) {
@@ -230,6 +247,9 @@ function proxyRequest(method, req, res) {
     if (slashIndex < 0) slashIndex = req.url.length;
     var id = req.url.substring(4, slashIndex);
     var ppath = req.url.substring(slashIndex);
+    if (syncManager.isInstalled(id)) {
+        return res.redirect(path.join('synclets', id, ppath));
+    }
     if(serviceManager.isDisabled(id)) {
         res.writeHead(503);
         res.end('This service has been disabled.');
