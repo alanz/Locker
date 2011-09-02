@@ -37,9 +37,6 @@ app.get('/', function(req, res) {
         ff_profiles_dir = process.env.HOME +
             '/Library/Application Support/Firefox/Profiles';
         break;
-    case "linux":
-        ff_profiles_dir = process.env.HOME +
-            '/.mozilla/firefox';
     default:
         break;
     }
