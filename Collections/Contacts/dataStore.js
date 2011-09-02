@@ -8,10 +8,12 @@
 */
 
 var collection;
+var db;
 var lconfig = require('../../Common/node/lconfig');
 
-exports.init = function(mongoCollection) {
+exports.init = function(mongoCollection, mongo) {
     collection = mongoCollection;
+    db = mongo.dbClient;
 }
 
 exports.getTotalCount = function(callback) {
@@ -19,6 +21,19 @@ exports.getTotalCount = function(callback) {
 }
 exports.getAll = function(callback) {
     collection.find({}, callback);
+}
+
+// this needs to move into the query interface i think
+//
+exports.getMinimal = function(offset, limit, callback) {
+    collection.find({}, {skip: offset, limit: limit, _id : 1, addresses: 1, emails: 1, name: 1, phoneNumbers: 1, photos: 1,
+                         'accounts.facebook.data.link': 1, 'accounts.foursquare.data.id': 1,
+                         'accounts.github.data.login': 1, 'accounts.twitter.data.screen_name': 1},
+                    callback);
+}
+
+exports.get = function(id, callback) {
+    collection.findOne({_id: new db.bson_serializer.ObjectID(id)}, callback);
 }
 
 exports.addEvent = function(eventBody, callback) {
@@ -38,7 +53,7 @@ exports.addEvent = function(eventBody, callback) {
             if(eventBody.obj.source !== 'watcher')
                 target = exports.addGithubData;
             break;
-        case 'contact/google':
+        case 'contact/gcontacts':
             target = exports.addGoogleContactsData;
             break;
     }
@@ -72,7 +87,7 @@ exports.addData = function(type, endpoint, data, callback) {
         exports.addTwitterData(endpoint, data, callback);
     } else if (type == 'foursquare') {
         exports.addFoursquareData(data, callback);
-    } else if (type == 'google') {
+    } else if (type == 'gcontacts') {
         exports.addGoogleContactsData(data, callback);
     } else if (type == 'github') {
         exports.addGithubData(endpoint, data, callback);
@@ -288,8 +303,8 @@ exports.addGoogleContactsData = function(googleContactsData, callback) {
     if(cleanedName)
         addToSet['_matching.cleanedNames'] = cleanedName;
     //photos
-    if(data.id && data.photo)
-        addToSet.photos = '/' + lconfig.me + '/gcontacts/photo/' + data.id;
+    // if(data.id && data.photo)
+    //     addToSet.photos = '/' + lconfig.me + '/gcontacts/photo/' + data.id;
     //addresses
     if(data.address) {
         var addresses = [];

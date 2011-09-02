@@ -59,10 +59,12 @@ exports.findInstalled = function (callback) {
             if(!path.existsSync(dir+'/me.json')) continue;
             var js = JSON.parse(fs.readFileSync(dir+'/me.json', 'utf-8'));
             if (js.synclets) {
+                exports.migrate(dir, js);
                 console.log("Loaded synclets for "+js.id);
                 synclets.installed[js.id] = js;
                 synclets.installed[js.id].status = "waiting";
                 for (var j = 0; j < js.synclets.length; j++) {
+                    js.synclets[j].status = 'waiting';
                     scheduleRun(js, js.synclets[j]);
                 }
             }
@@ -119,6 +121,7 @@ exports.install = function(metaData) {
         throw "invalid synclet, has no provider";
     }
     synclets.installed[serviceInfo.id] = serviceInfo;
+    serviceInfo.version = Date.now();
     fs.mkdirSync(path.join(lconfig.lockerDir, lconfig.me, serviceInfo.id),0755);
     fs.writeFileSync(path.join(lconfig.lockerDir, lconfig.me, serviceInfo.id, 'me.json'),JSON.stringify(serviceInfo, null, 4));
     for (var i = 0; i < serviceInfo.synclets.length; i++) {
@@ -214,7 +217,7 @@ function executeSynclet(info, synclet, callback) {
 
 function compareIDs (originalConfig, newConfig) {
     var resp = {};
-    if (originalConfig.ids && newConfig.ids) {
+    if (originalConfig && originalConfig.ids && newConfig && newConfig.ids) {
         for (var i in newConfig.ids) {
             if (!originalConfig.ids[i]) break;
             var newSet = newConfig.ids[i];
@@ -238,6 +241,9 @@ function processResponse(deleteIDs, info, synclet, response, callback) {
             callback = function() {};
         }
         var dataKeys = [];
+        if (typeof(response.data) === 'string') {
+            return callback('bad data from synclet');
+        }
         for (var i in response.data) {
             dataKeys.push(i);
         }
@@ -292,21 +298,53 @@ function deleteData (collection, deleteIds, info, eventType, callback) {
 
 function addData (collection, data, info, eventType, callback) {
     async.forEach(data, function(object, cb) {
-        var newEvent = {obj : {source : collection, type: object.type, data: object.obj}};
-        newEvent.fromService = "synclet/" + info.id;
-        if (object.type === 'delete') {
-            datastore.removeObject(collection, object.obj[info.mongoId], {timeStamp: object.timestamp}, cb);
-            levents.fireEvent(eventType, newEvent.fromService, newEvent.obj.type, newEvent.obj);
-        } else {
-            datastore.addObject(collection, object.obj, {timeStamp: object.timestamp}, function(err, type) {
-                if (type === 'same') return cb();
-                newEvent.obj.type = type;
+        if (object.obj) {
+            var newEvent = {obj : {source : collection, type: object.type, data: object.obj}};
+            newEvent.fromService = "synclet/" + info.id;
+            if (object.type === 'delete') {
+                datastore.removeObject(collection, object.obj[info.mongoId], {timeStamp: object.timestamp}, cb);
                 levents.fireEvent(eventType, newEvent.fromService, newEvent.obj.type, newEvent.obj);
-                cb();
-            });
+            } else {
+                datastore.addObject(collection, object.obj, {timeStamp: object.timestamp}, function(err, type, doc) {
+                    if (type === 'same') return cb();
+                    newEvent.obj.data = doc;
+                    levents.fireEvent(eventType, newEvent.fromService, newEvent.obj.type, newEvent.obj);
+                    cb();
+                });
+            }
         }
     }, callback);
 }
+
+/**
+* Migrate a service if necessary
+*/
+exports.migrate = function(installedDir, metaData) {
+    if (!metaData.version) { metaData.version = 1; }
+    var migrations = [];
+    try {
+        migrations = fs.readdirSync(metaData.srcdir + "/migrations");
+    } catch (E) {}
+    if (migrations) {
+        for (var i = 0; i < migrations.length; i++) {
+            if (migrations[i].substring(0, 13) > metaData.version) {
+                try {
+                    var cwd = process.cwd();
+                    migrate = require(cwd + "/" + metaData.srcdir + "/migrations/" + migrations[i]);
+                    if (migrate(installedDir)) {
+                        metaData.version = migrations[i].substring(0, 13);
+                    }
+                    process.chdir(cwd);
+                } catch (E) {
+                    console.log("error running migration : " + migrations[i] + " for service " + metaData.title + " ---- " + E);
+                    process.chdir(cwd);
+                }
+            }
+        }
+    }
+    return;
+}
+
 /**
 * Map a meta data file JSON with a few more fields and make it available
 */
@@ -326,16 +364,16 @@ function addUrls() {
         host = "http://";
     }
     host += lconfig.externalHost + ":" + lconfig.externalPort + "/";
-    if (path.existsSync(path.join(lconfig.lockerDir, lconfig.me, "apikeys.json"))) {
+    if (path.existsSync(path.join(lconfig.lockerDir, "Config", "apikeys.json"))) {
         try {
-            apiKeys = JSON.parse(fs.readFileSync(path.join(lconfig.lockerDir, lconfig.me, "apikeys.json"), 'ascii'));
+            apiKeys = JSON.parse(fs.readFileSync(path.join(lconfig.lockerDir, "Config", "apikeys.json"), 'ascii'));
         } catch(e) {
             return console.log('Error reading apikeys.json file - ' + e);
         }
         for (var i = 0; i < synclets.available.length; i++) {
             synclet = synclets.available[i];
             if (synclet.provider === 'facebook') {
-                if (apiKeys.facebook) synclet.authurl = "https://graph.facebook.com/oauth/authorize?client_id=" + apiKeys.facebook.appKey + '&response_type=code&redirect_uri=' + host + "auth/facebook/auth&scope=email,offline_access,read_stream,user_photos,friends_photos,publish_stream,user_photo_video_tags";
+                if (apiKeys.facebook) synclet.authurl = "https://graph.facebook.com/oauth/authorize?client_id=" + apiKeys.facebook.appKey + '&response_type=code&redirect_uri=' + host + "auth/facebook/auth&scope=email,offline_access,read_stream,user_photos,friends_photos,user_photo_video_tags";
             } else if (synclet.provider === 'twitter') {
                 if (apiKeys.twitter) synclet.authurl = host + "auth/twitter/auth";
             } else if (synclet.provider === 'foursquare') {

@@ -21,8 +21,10 @@ var vows = require("vows")
   , request = require('request')
   , primaryType = "testSync/testSynclet"
   , otherType = "eventType/testSynclet"
+  , _id
+  , obj
   ;
-lconfig.load("config.json");
+lconfig.load("Config/config.json");
 var levents = require("levents");
 var realFireEvent = levents.fireEvent;
 levents.fireEvent = function(type, id, action, obj) {
@@ -142,7 +144,7 @@ vows.describe("Synclet Manager").addBatch({
                 });
             },
             "successfully" : function(err, count) {
-                assert.equal(allEvents[primaryType].length, 3);
+                assert.equal(allEvents[primaryType].length, 2);
             }
         }
     }
@@ -160,7 +162,7 @@ vows.describe("Synclet Manager").addBatch({
             fs.readFile(lconfig.me + "/testSynclet/testSync.json", this.callback);
         },
         "successfully" : function(err, data) {
-            assert.equal(data.toString(), '{"timeStamp":1312325283583,"data":{"deleted":1312325283583,"notId":1}}\n{"timeStamp":1312325283581,"data":{"notId":500,"someData":"BAM"}}\n{"timeStamp":1312325283582,"data":{"notId":1,"someData":"datas"}}\n');
+            assert.equal(data.toString(), '{"timeStamp":1312325283581,"data":{"notId":500,"someData":"BAM"}}\n{"timeStamp":1312325283582,"data":{"notId":1,"someData":"datas"}}\n');
         }
     },
     "into both" : {
@@ -174,7 +176,7 @@ vows.describe("Synclet Manager").addBatch({
     "and after generating " : {
         topic: allEvents,
         "correct number of events" : function(topic) {
-            assert.equal(allEvents[primaryType].length, 3);
+            assert.equal(allEvents[primaryType].length, 2);
         },
         "with correct data" : function(topic) {
             /*
@@ -183,10 +185,11 @@ vows.describe("Synclet Manager").addBatch({
             assert.equal(events[2].fromService, 'synclet/testSynclet');
             */
             var events = allEvents[primaryType];
-            assert.equal(events[0].type, 'delete');
-            assert.equal(events[2].type, 'new');
-            assert.equal(events[0].data.notId, 1);
-            assert.equal(events[1].data.notId, 500);
+            assert.equal(events[1].type, 'new');
+            assert.notEqual(events[0].data._id, undefined);
+            assert.notEqual(events[1].data._id, undefined)
+            assert.equal(events[0].data.notId, 500);
+            assert.equal(events[1].data.notId, 1);
             events = [];
         },
         "correct types of events": function(topic) {
@@ -204,8 +207,20 @@ vows.describe("Synclet Manager").addBatch({
         },
         "from testSync" : function(err, resp, body) {
             var data = JSON.parse(body);
+            _id = data[0]._id;
+            obj = data[0];
             assert.equal(data[0].notId, 500);
             assert.equal(data[0].someData, 'BAM');
+        }
+    }
+}).addBatch({
+    "Querying for an ID returns the object": {
+        topic: function() {
+            request.get({uri : "http://localhost:8043/synclets/testSynclet/testSync/" + _id}, this.callback);
+        },
+        "successfully" : function(err, resp, body) {
+            var data = JSON.parse(body);
+            assert.deepEqual(obj, data);
         }
     }
 }).addBatch({
@@ -281,8 +296,22 @@ vows.describe("Synclet Manager").addBatch({
             }
         }
     },
+    "Migrates services that need it during the install" : {
+        topic: [],
+        "changing their version" : function(topic) {
+            assert.include(syncManager.synclets().installed, "migration-test2");
+            assert.isTrue(syncManager.isInstalled("migration-test2"));
+            assert.notEqual(syncManager.synclets().installed['migration-test2'], undefined);
+            assert.notEqual(syncManager.synclets().installed['migration-test2'].version, undefined);
+            assert.equal(syncManager.synclets().installed['migration-test2'].version, 1308079085972);
+        },
+        "and running the migration successfully" : function(topic) {
+            var me = JSON.parse(fs.readFileSync(process.cwd() + "/" + lconfig.me + "/migration-test/me.json", 'ascii'));
+            assert.notEqual(me.mongoCollections, undefined);
+            assert.equal(me.mongoCollections[0], 'new_collection');
+        }
+    },
     teardown : function() {
         levents.fireEvent = realFireEvent;
     }
 }).export(module);
-

@@ -17,7 +17,7 @@
         "dropbox": "=0.3.1",
         "facebook-js": "=0.0.5",
         "flickr-reflection": "=0.0.1",
-        "gdata-js": "=0.0.4",
+        "gdata-js": ">=0.0.4",
         "github": "=0.0.6",
         "imap": "=0.2.3",
         "lastfm": "=0.4.3",
@@ -33,7 +33,12 @@
         "wrench": "=1.1.0",
         "eyes": "=0.1.6",
         "knox": "=0.0.8",
+        "unshortener": ">=0.0.8",
+        "sax": ">=0.2.3",
+        "readabilitySAX": "=0.1.1",
         "mongodb": ">=0.9.6",
-        "winston": ">0.3.0"
+        "winston": ">0.3.0",
+        "clucene": ">=0.1.1",
+        "jade": ">= 0.0.1"
     }
 }

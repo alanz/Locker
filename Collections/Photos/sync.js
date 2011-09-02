@@ -28,7 +28,7 @@ var photoGatherers = {
 };
 
 exports.gatherPhotos = function() {
-    lconfig.load('../../config.json');
+    lconfig.load('../../Config/config.json');
     dataStore.clear(function(err) {
         locker.providers('photo', function(err, services) {
             if (!services) return;
@@ -50,6 +50,8 @@ exports.gatherPhotos = function() {
                 }
             });
         });
+        // also try twitter, fails out if none
+        gatherFromUrl("twitter","/getCurrent/tweets","tweets/twitter");
     });
 }
 
