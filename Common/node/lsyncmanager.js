@@ -11,7 +11,8 @@ var fs = require('fs')
 
 var synclets = {
     available:[],
-    installed:{}
+    installed:{},
+    executeable:true
 };
 
 exports.synclets = function() {
@@ -57,7 +58,7 @@ exports.findInstalled = function (callback) {
         try {
             if(!fs.statSync(dir).isDirectory()) continue;
             if(!path.existsSync(dir+'/me.json')) continue;
-            var js = JSON.parse(fs.readFileSync(dir+'/me.json', 'utf-8'));
+            var js = JSON.parse(fs.readFileSync(dir+'/me.json', 'utf8'));
             if (js.synclets) {
                 exports.migrate(dir, js);
                 console.log("Loaded synclets for "+js.id);
@@ -140,18 +141,31 @@ exports.status = function(serviceId) {
 
 exports.syncNow = function(serviceId, callback) {
     if (!synclets.installed[serviceId]) return callback("no service like that installed");
-    async.forEach(synclets.installed[serviceId].synclets, function(synclet, cb) { executeSynclet(synclets.installed[serviceId], synclet, cb); }, callback);
+    async.forEach(synclets.installed[serviceId].synclets, function(synclet, cb) {
+        executeSynclet(synclets.installed[serviceId], synclet, cb);
+    }, callback);
 };
 
 /**
 * Add a timeout to run a synclet
 */
 function scheduleRun(info, synclet) {
-    // TODO if there is a .nextRun and it's past-due, run it now!
-    synclet.nextRun = new Date(Date.now() + (parseInt(synclet.frequency) * 1000));
-    setTimeout(function() {
+    if(info.config && info.config.nextRun) {
+        synclet.nextRun = new Date(info.config.nextRun);
+    } else {
+        synclet.nextRun = new Date(Date.now() + (parseInt(synclet.frequency) * 1000));
+    }
+
+    function run() {
         executeSynclet(info, synclet);
-    }, parseInt(synclet.frequency) * 1000);
+    }
+
+    var timeout = synclet.nextRun - Date.now();
+    if(timeout < 0) { // now
+        process.nextTick(run)
+    } else { // later
+        setTimeout(run, timeout);
+    }
 };
 
 /**
@@ -161,6 +175,17 @@ function executeSynclet(info, synclet, callback) {
     if (synclet.status === 'running') {
         if (callback) {
             callback('already running');
+        }
+        return;
+    }
+    // we're put on hold from running any for some reason, re-schedule them
+    // this is a workaround for making synclets available in the map separate from scheduling them which could be done better
+    if (!synclets.executeable)
+    {
+        console.log("Delaying execution of synclet "+synclet.name+" for "+info.id);
+        scheduleRun(info, synclet);
+        if (callback) {
+            callback();
         }
         return;
     }
@@ -175,7 +200,7 @@ function executeSynclet(info, synclet, callback) {
     var dataResponse = '';
 
     app = spawn(run.shift(), run, {cwd: path.join(lconfig.lockerDir, info.srcdir)});
-    
+
     app.stderr.on('data', function (data) {
         var mod = console.outputModule;
         console.outputModule = info.title+" "+synclet.name;
@@ -186,7 +211,7 @@ function executeSynclet(info, synclet, callback) {
     app.stdout.on('data',function (data) {
         dataResponse += data;
     });
-    
+
     app.on('exit', function (code,signal) {
         var response;
         try {
@@ -200,15 +225,18 @@ function executeSynclet(info, synclet, callback) {
         }
         console.log("Synclet "+synclet.name+" finished for "+info.id);
         info.status = synclet.status = 'processing data';
-        tempInfo = JSON.parse(fs.readFileSync(path.join(lconfig.lockerDir, lconfig.me, info.id, 'me.json')));
         var deleteIDs = compareIDs(info.config, response.config);
-        processResponse(deleteIDs, info, synclet, response, callback);
+        tempInfo = JSON.parse(fs.readFileSync(path.join(lconfig.lockerDir, lconfig.me, info.id, 'me.json')));
+        info.auth = lutil.extend(true, tempInfo.auth, response.auth);
         info.config = lutil.extend(true, tempInfo.config, response.config);
-        fs.writeFileSync(path.join(lconfig.lockerDir, lconfig.me, info.id, 'me.json'), JSON.stringify(info, null, 4));
         scheduleRun(info, synclet);
+        processResponse(deleteIDs, info, synclet, response, function(err, cbresponse) {
+            fs.writeFileSync(path.join(lconfig.lockerDir, lconfig.me, info.id, 'me.json'), JSON.stringify(info, null, 4));
+            if (callback) callback(err, cbresponse);
+        });
     });
     if (!info.config) info.config = {};
-    
+
     info.syncletToRun = synclet;
     info.syncletToRun.workingDirectory = path.join(lconfig.lockerDir, lconfig.me, info.id);
     app.stdin.write(JSON.stringify(info)+"\n"); // Send them the process information
@@ -260,60 +288,84 @@ function processData (deleteIDs, info, key, data, callback) {
 //    console.log("processing synclet data from "+key+" of length "+data.length);
     var collection = info.id + "_" + key;
     var eventType = key + "/" + info.provider;
-    
+
     if (key.indexOf('/') !== -1) {
         collection = info.id + "_" + key.substring(key.indexOf('/') + 1);
         eventType = key.substring(0, key.indexOf('/')) + "/" + info.provider;
         key = key.substring(key.indexOf('/') + 1);
     }
 
-    if (info.mongoId) { 
-        datastore.addCollection(key, info.id, info.mongoId);
-    } else {
-        datastore.addCollection(key, info.id, "id");
-    }
-    
+    var mongoId;
+    if(typeof info.mongoId === 'string')
+        mongoId = info.mongoId
+    else if(info.mongoId)
+        mongoId = info.mongoId[key + 's'] || 'id';
+    else
+        mongoId = 'id';
+
+    datastore.addCollection(key, info.id, mongoId);
+
     if (deleteIDs && deleteIDs.length > 0 && data) {
-        addData(collection, data, info, eventType, function() {
-            deleteData(collection, deleteIDs, info, eventType, callback);
+        addData(collection, mongoId, data, info, eventType, function(err) {
+            if(err) {
+                callback(err);
+            } else {
+                deleteData(collection, mongoId, deleteIDs, info, eventType, callback);
+            }
         });
     } else if (data) {
-        addData(collection, data, info, eventType, callback);
+        addData(collection, mongoId, data, info, eventType, callback);
     } else if (deleteIDs && deleteIDs.length > 0) {
-        deleteData(collection, deleteIDs, info, eventType, callback);
+        deleteData(collection, mongoId, deleteIDs, info, eventType, callback);
     } else {
         callback();
     }
 }
 
-function deleteData (collection, deleteIds, info, eventType, callback) {
+function deleteData (collection, mongoId, deleteIds, info, eventType, callback) {
     async.forEach(deleteIds, function(id, cb) {
         var newEvent = {obj : {source : eventType, type: 'delete', data : {}}};
-        newEvent.obj.data[info.mongoId] = id;
+        newEvent.obj.data[mongoId] = id;
         newEvent.fromService = "synclet/" + info.id;
         levents.fireEvent(eventType, newEvent.fromService, newEvent.obj.type, newEvent.obj);
         datastore.removeObject(collection, id, {timeStampe: Date.now()}, cb);
     }, callback);
 }
 
-function addData (collection, data, info, eventType, callback) {
+function addData (collection, mongoId, data, info, eventType, callback) {
+    var errs = [];
     async.forEach(data, function(object, cb) {
         if (object.obj) {
+            if(object.obj[mongoId] === null || object.obj[mongoId] === undefined) {
+                console.error('rut roh! no value for primary key!');
+                errs.push({"message":"no value for primary key", "obj": object.obj});
+                cb();
+                return;
+            }
             var newEvent = {obj : {source : collection, type: object.type, data: object.obj}};
             newEvent.fromService = "synclet/" + info.id;
             if (object.type === 'delete') {
-                datastore.removeObject(collection, object.obj[info.mongoId], {timeStamp: object.timestamp}, cb);
+                datastore.removeObject(collection, object.obj[mongoId], {timeStamp: object.timestamp}, cb);
                 levents.fireEvent(eventType, newEvent.fromService, newEvent.obj.type, newEvent.obj);
             } else {
                 datastore.addObject(collection, object.obj, {timeStamp: object.timestamp}, function(err, type, doc) {
                     if (type === 'same') return cb();
                     newEvent.obj.data = doc;
-                    levents.fireEvent(eventType, newEvent.fromService, newEvent.obj.type, newEvent.obj);
+                    levents.fireEvent(eventType, newEvent.fromService, type, newEvent.obj);
                     cb();
                 });
             }
         }
-    }, callback);
+    }, function(err) {
+        if (err) {
+            errs.push(err);
+        }
+        if (errs.length > 0) {
+            callback(errs);
+        } else {
+            callback();
+        }
+    });
 }
 
 /**
@@ -349,7 +401,7 @@ exports.migrate = function(installedDir, metaData) {
 * Map a meta data file JSON with a few more fields and make it available
 */
 function mapMetaData(file) {
-    var metaData = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    var metaData = JSON.parse(fs.readFileSync(file, 'utf8'));
     metaData.srcdir = path.dirname(file);
     synclets.available.push(metaData);
     return metaData;
@@ -366,22 +418,34 @@ function addUrls() {
     host += lconfig.externalHost + ":" + lconfig.externalPort + "/";
     if (path.existsSync(path.join(lconfig.lockerDir, "Config", "apikeys.json"))) {
         try {
-            apiKeys = JSON.parse(fs.readFileSync(path.join(lconfig.lockerDir, "Config", "apikeys.json"), 'ascii'));
+            apiKeys = JSON.parse(fs.readFileSync(path.join(lconfig.lockerDir, "Config", "apikeys.json"), 'utf-8'));
         } catch(e) {
             return console.log('Error reading apikeys.json file - ' + e);
         }
         for (var i = 0; i < synclets.available.length; i++) {
             synclet = synclets.available[i];
             if (synclet.provider === 'facebook') {
-                if (apiKeys.facebook) synclet.authurl = "https://graph.facebook.com/oauth/authorize?client_id=" + apiKeys.facebook.appKey + '&response_type=code&redirect_uri=' + host + "auth/facebook/auth&scope=email,offline_access,read_stream,user_photos,friends_photos,user_photo_video_tags";
+                if (apiKeys.facebook)
+                    synclet.authurl = "https://graph.facebook.com/oauth/authorize?client_id=" + apiKeys.facebook.appKey +
+                                        '&response_type=code&redirect_uri=' + host + "auth/facebook/auth" +
+                                        "&scope=email,offline_access,read_stream,user_photos,friends_photos,user_photo_video_tags";
             } else if (synclet.provider === 'twitter') {
                 if (apiKeys.twitter) synclet.authurl = host + "auth/twitter/auth";
+            } else if (synclet.provider === 'flickr') {
+                if (apiKeys.flickr) synclet.authurl = host + "auth/flickr/auth";
             } else if (synclet.provider === 'foursquare') {
-                if (apiKeys.foursquare) synclet.authurl = "https://foursquare.com/oauth2/authenticate?client_id=" + apiKeys.foursquare.appKey + "&response_type=code&redirect_uri=" + host + "auth/foursquare/auth";
+                if (apiKeys.foursquare)
+                    synclet.authurl = "https://foursquare.com/oauth2/authenticate?client_id=" + apiKeys.foursquare.appKey +
+                                                            "&response_type=code&redirect_uri=" + host + "auth/foursquare/auth";
             } else if (synclet.provider === 'gcontacts') {
-                if (apiKeys.gcontacts) synclet.authurl = "https://accounts.google.com/o/oauth2/auth?client_id=" + apiKeys.gcontacts.appKey + "&redirect_uri=" + host + "auth/gcontacts/auth&scope=https://www.google.com/m8/feeds/&response_type=code";
+                if (apiKeys.gcontacts)
+                    synclet.authurl = "https://accounts.google.com/o/oauth2/auth?client_id=" + apiKeys.gcontacts.appKey +
+                                                    "&redirect_uri=" + host + "auth/gcontacts/auth" +
+                                                    "&scope=https://www.google.com/m8/feeds/&response_type=code";
             } else if (synclet.provider === 'github') {
-                if (apiKeys.github) synclet.authurl = "https://github.com/login/oauth/authorize?client_id=" + apiKeys.github.appKey + '&response_type=code&redirect_uri=' + host + 'auth/github/auth';
+                if (apiKeys.github)
+                    synclet.authurl = "https://github.com/login/oauth/authorize?client_id=" + apiKeys.github.appKey +
+                                                    '&response_type=code&redirect_uri=' + host + 'auth/github/auth';
             }
         }
     }

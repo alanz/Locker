@@ -8,7 +8,7 @@
 */
 
 /*
-* Tests the acutal implementation of the lsyncmanager.  
+* Tests the acutal implementation of the lsyncmanager.
 */
 
 require.paths.push(__dirname + "/../Common/node");
@@ -23,6 +23,7 @@ var vows = require("vows")
   , otherType = "eventType/testSynclet"
   , _id
   , obj
+  , colls
   ;
 lconfig.load("Config/config.json");
 var levents = require("levents");
@@ -35,7 +36,7 @@ levents.fireEvent = function(type, id, action, obj) {
 }
 
 var syncManager = require("lsyncmanager.js");
-var lmongoclient = require('../Common/node/lmongoclient.js')(lconfig.mongo.host, lconfig.mongo.port, 'synclets', ['testSynclet_testSync', 'testSynclet_dataStore']);
+var lmongo = require('../Common/node/lmongo');
 
 /*
 syncManager.eventEmitter.on('testSync/testSynclet', function(event) {
@@ -125,6 +126,13 @@ vows.describe("Synclet Manager").addBatch({
                     assert.equal(topic[i].authurl, "https://foursquare.com/oauth2/authenticate?client_id=4sq-appkey&response_type=code&redirect_uri=http://localhost:8043/auth/foursquare/auth");
                 }
             }
+        },
+        "flickr worked" : function(topic) {
+            for (var i = 0; i < topic.length; i++) {
+                if (topic[i].provider === 'flickr') {
+                    assert.equal(topic[i].authurl, "http://localhost:8043/auth/flickr/auth");
+                }
+            }
         }
     },
     "Installed services can be executed immediately rather than waiting for next run" : {
@@ -133,14 +141,19 @@ vows.describe("Synclet Manager").addBatch({
             syncManager.syncNow("testSynclet", this.callback);
         },
         "successfully" : function(err, status) {
+            console.error(syncManager.synclets().installed.testSynclet.synclets[0]);
             assert.isNull(err);
+        },
+        "and can specify a \"nextRun\" time" : function(err, status) {
+            assert.equal(syncManager.synclets().installed.testSynclet.synclets[0].nextRun.getTime(), 2424242424242);
         },
         "and after running generates data in mongo" : {
             topic: function() {
                 var self = this;
-                lmongoclient.connect(function(theMongo) {
+                lmongo.init('synclets', ['testSynclet_testSync', 'testSynclet_dataStore'], function(theMongo, theColls) {
                     mongo = theMongo;
-                    mongo.collections.testSynclet_testSync.count(self.callback);
+                    colls = theColls;
+                    colls.testSynclet_testSync.count(self.callback);
                 });
             },
             "successfully" : function(err, count) {
@@ -151,7 +164,7 @@ vows.describe("Synclet Manager").addBatch({
 }).addBatch({
     "and also generates " : {
         topic: function() {
-            mongo.collections.testSynclet_dataStore.count(this.callback);
+            colls.testSynclet_dataStore.count(this.callback);
         },
         "data in the namespaced collection" : function(err, count) {
             assert.equal(count, 1);
@@ -236,22 +249,31 @@ vows.describe("Synclet Manager").addBatch({
         }
     }
 }).addBatch({
-    "Removing IDs from the config will" : {
+    "If the source doesn't return an ID" : {
         topic: function() {
             allEvents[primaryType] = [];
             var self = this;
-            mongo.collections.testSynclet_testSync.drop(function() {
+            colls.testSynclet_testSync.drop(function() {
                 syncManager.syncNow("testSynclet", function() {
-                    mongo.collections.testSynclet_testSync.count(self.callback);
+                    colls.testSynclet_testSync.count(self.callback);
                 });
             });
         },
-        "will generate a delete event and remove the row from mongo" : function(err, count) {
+        "it will generate a delete event and remove the row from mongo" : function(err, count) {
             var events = allEvents[primaryType];
             assert.equal(count, 0);
             assert.equal(events.length, 1);
             assert.equal(events[0].type, 'delete');
             assert.equal(events[0].data.notId, 500);
+        }
+    }
+}).addBatch({
+    "Running testSynclet again" : {
+        topic: function() {
+            syncManager.syncNow("testSynclet", this.callback);
+        },
+        "with no value for 'notId'" : function(arg1, arg2, arg3) {
+            assert.equal(arg1[0].message, 'no value for primary key');
         }
     }
 }).addBatch({

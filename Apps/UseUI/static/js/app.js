@@ -36,6 +36,14 @@ $(document).ready(
             return false;
         });
 
+        $('#nav-search').submit(function() {
+            var inputText = $("#nav-search .search").val();
+            window.location.hash = "search";
+            $('.selected').removeClass('selected');
+            $("#appFrame")[0].contentWindow.location.replace("/Me/searchapp/search?type=&searchterm="+inputText);
+            return false;
+         });
+
         renderApp();
 
         $(window).resize(resizeFrame);
@@ -185,7 +193,8 @@ function accountPopup (elem) {
     var oauthPopupSizes = {foursquare: {height: 540,  width: 960},
                  github: {height: 1000, width: 1000},
                  twitter: {width: 630, height: 500},
-                 facebook: {width: 980, height: 705}
+                 facebook: {width: 980, height: 705},
+                 flickr: {width: 1000, height: 877}
                 };
     if (oauthPopupSizes[elem.data('provider')]) {
         width = oauthPopupSizes[elem.data('provider')].width;

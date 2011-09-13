@@ -1,6 +1,7 @@
 var request = require('request');
 var util = require('./util');
 var async = require('async');
+var wrench = require('wrench');
 var logger = require(__dirname + "/../../Common/node/logger").logger;
 var lutil = require('lutil');
 
@@ -13,9 +14,10 @@ exports.init = function(l, dStore, s){
 }
 
 // manually walk and reindex all possible link sources
-exports.reIndex = function(locker) {
+exports.reIndex = function(locker,cb) {
     search.resetIndex();
     dataStore.clear(function(){
+        cb(); // synchro delete, async/background reindex
         locker.providers(['link/facebook', 'status/twitter'], function(err, services) {
             if (!services) return;
             services.forEach(function(svc) {
@@ -35,7 +37,7 @@ exports.reIndex = function(locker) {
                     });
                 }
             });
-        });        
+        });
     });
 }
 
@@ -43,6 +45,7 @@ exports.reIndex = function(locker) {
 exports.processEvent = function(event, callback)
 {
     if(!callback) callback = function(){};
+    // TODO: should we be only tracking event.action = new?
     // what a mess
     var item = (event.obj.data.sourceObject)?event.obj.data.sourceObject:event.obj.data;
     if(event.type.indexOf("facebook") > 0)
@@ -60,7 +63,7 @@ function getLinks(getter, lurl, callback) {
     request.get({uri:lurl}, function(err, resp, body) {
         var arr;
         try{
-            arr = JSON.parse(body);            
+            arr = JSON.parse(body);
         }catch(E){
             return callback();
         }
@@ -73,14 +76,17 @@ function getLinks(getter, lurl, callback) {
     });
 }
 
-function processEncounter(e, cb) 
+function processEncounter(e, cb)
 {
-    encounterQueue.push(e, function(arg){
-        console.error("QUEUE SIZE: "+encounterQueue.length());        
-        cb(arg);
+    dataStore.enqueue(e, function() {
+        encounterQueue.push(e, function(arg){
+            console.error("QUEUE SIZE: "+encounterQueue.length());
+            cb();
+        });
     });
     console.error("QUEUE SIZE: "+encounterQueue.length());
 }
+
 var encounterQueue = async.queue(function(e, callback) {
     // do all the dirty work to store a new encounter
     var urls = [];
@@ -88,7 +94,7 @@ var encounterQueue = async.queue(function(e, callback) {
     util.extractUrls({text:e.text},function(u){ urls.push(u); }, function(err){
         if(err) return callback(err);
         // for each one, run linkMagic on em
-        if (urls.length === 0) return callback();
+        if (urls.length === 0) return dataStore.dequeue(e, callback);
         async.forEach(urls,function(u,cb){
             linkMagic(u,function(link){
                 // make sure to pass in a new object, asyncutu
@@ -101,9 +107,21 @@ var encounterQueue = async.queue(function(e, callback) {
                     });
                 }); // once resolved, store the encounter
             });
-        }, callback);
+        }, function() {
+            dataStore.dequeue(e, callback);
+        });
     });
 }, 5);
+
+exports.loadQueue = function() {
+    dataStore.fetchQueue(function(err, docs) {
+        for (var i = 0; i < docs.length; i++) {
+            encounterQueue.push(docs[i].obj, function(arg) {
+                console.error("QUEUE SIZE: " + encounterQueue.length());
+            });
+        }
+    });
+}
 
 // given a raw url, result in a fully stored qualified link (cb's full link url)
 function linkMagic(origUrl, callback){

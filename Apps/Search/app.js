@@ -16,10 +16,12 @@ var express = require('express'),
     
 var locker = require('locker'),
     lconfig = require('lconfig'),
+    lutil = require('lutil'),
 //  search = require('./lib/elasticsearch/index.js');
 //  search = require('./lib/clucene/index.js');
     search = require('./lib/lockersearch/index.js');
-    
+   
+var DEBUG_SEARCH_OUTPUT = false; 
 
 // Config
 app.configure(function(){
@@ -53,33 +55,41 @@ function(req, res) {
     res.render('index', {
       error: null,
       homePath: '/Me/' + me.id,
-      searchPath: '/Me/' + me.id + '/search'
+      searchPath: '/Me/' + me.id + '/search',
+      term: ''
     });
 });
 
-app.post('/search',
+app.get('/search',
 function(req, res) {
     me = fs.readFileSync('me.json');
     me = JSON.parse(me);
     
-    var term = sanitize(req.param('searchterm'));
-    var type = sanitize(req.param('type'));
+    var term = lutil.sanitize(req.param('searchterm'));
+    console.error('term: ' + term);
+    var type = lutil.sanitize(req.param('type'));
     var results = [];
     var error = null;
     
     search.search(type, term, 0, 10, function(err, results) {
-      if (err) {
-        console.error(err);
-        error = err;
+        
+      if (!results || !results.hasOwnProperty('hits') || !results.hits.hasOwnProperty('hits')) {
+          console.error('No results object returned for search');
+          results = {};
+          results.hits = {};
+          results.hits.hits = [];
+          results.took = 1;
+          results.hits.total = 0;
       }
-      
+
       res.render('search', {
         term: term,
         homePath: '/Me/' + me.id,
+        searchPath: '/Me/' + me.id + '/search',
         results: results.hits.hits,
         took: results.took,
         total: results.hits.total,
-        raw: JSON.stringify(results),
+        raw: DEBUG_SEARCH_OUTPUT?JSON.stringify(results):false,
         error: err
       });
     });
@@ -123,15 +133,6 @@ app.get('/ready', function(req, res) {
     res.end('true');
 });
 
-// quick/dirty sanitization ripped from the Jade template engine
-function sanitize(term){
-    return String(term)
-        .replace(/&(?!\w+;)/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-}
-
 function indexCollectionRecordsOfType(type, urlPath, callback) {
 
   var lockerUrl = url.parse(processInfo.lockerUrl);
@@ -158,7 +159,7 @@ function indexCollectionRecordsOfType(type, urlPath, callback) {
       for (var i in results) {
         search.index(results[i]._id, type, results[i], function(err, result) {
           if (err) {
-            console.log('error indexing ' + type + ' with ID of ' + results[i]._id);
+            console.error('error indexing ' + type + ' with ID of ' + results[i]._id);
             callback(err);
           }
         });
@@ -167,7 +168,7 @@ function indexCollectionRecordsOfType(type, urlPath, callback) {
   });
 
   req.on('error', function(e) {
-    console.log('problem with request: ' + e.message);
+    console.error('problem with request: ' + e.message);
   });
 }
 

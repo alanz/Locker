@@ -41,7 +41,7 @@ $(function() {
     });
 
     // View used for details, overview
-    var SideView = Backbone.View.extend({ 
+    var SideView = Backbone.View.extend({
         el: $('aside div.detail'),
 
         events: {},
@@ -58,7 +58,7 @@ $(function() {
     });
 
     // List View for Contacts
-    var ListView = Backbone.View.extend({ 
+    var ListView = Backbone.View.extend({
         el: $('body'), // attaches `this.el` to an existing element.
 
         _s: {
@@ -105,7 +105,7 @@ $(function() {
             $(ev.currentTarget).addClass('clicked');
             this.drawDetailsPane(cid);
         },
-        
+
         drawDetailsPane: function(cid) {
             displayedContact = cid;
             var self = this;
@@ -119,7 +119,7 @@ $(function() {
                 self.updateDetails(model.get('detailedData'));
             }
         },
-        
+
         hideDetailsPane: function() {
             displayedContact = '';
             $('aside').css('z-index', -1);
@@ -182,6 +182,9 @@ $(function() {
                 if(contact.accounts.foursquare) {
                     newContact.set({foursquare: contact.accounts.foursquare[0]});
                 }
+                if(contact.accounts.flickr) {
+                    newContact.set({flickr: contact.accounts.flickr[0]});
+                }
             }
 
             this.collection.add(newContact); // add item to collection; view is updated via event 'add'
@@ -207,11 +210,13 @@ $(function() {
         load: function load(callback) {
             $('#loader').show();
             var that = this;
-            var baseURL = '/Me/contacts';
+            var baseURL = '/query/getContact';
+            var fields = "['_id','addresses','emails','name','phoneNumbers','photos','accounts.facebook.data.link'," +
+                         "'accounts.foursquare.data.id','accounts.github.data.login','accounts.twitter.data.screen_name']";
             var offset = 0;
 
             (function getContactsCB() {
-                $.getJSON(baseURL + '/allMinimal', {offset:offset, limit: 250}, function(contacts) {
+                $.getJSON(baseURL, {offset:offset, limit: 250, fields: fields}, function(contacts) {
                     if (contacts.length === 0) {
                         $('#loader').hide();
                         return callback();
@@ -455,6 +460,7 @@ $(function() {
             contactTemplate += '<% if (typeof(email) != "undefined") { %><a href="mailto:<%= email %>" target="_b" class="social_link email">Email</a><% } %> ';
             contactTemplate += '<% if (typeof(facebook) != "undefined") { %><a href="<%= facebook %>" class="social_link facebook" target="_b">Facebook Profile</a><% } %>';
             contactTemplate += '<% if (typeof(twitterHandle) != "undefined" && typeof(twitterHandle.data.screen_name) != "undefined") { %><a href="http://twitter.com/<%= twitterHandle.data.screen_name %>" class="social_link twitter" target="_b">Twitter Profile</a><% } %>';
+            contactTemplate += '<% if (typeof(flickr) != "undefined" && typeof(flickr.data.username) != "undefined") { %><a href="http://flickr.com/people/<%= flickr.data.nsid %>" class="social_link flickr" target="_b">Flickr Profile</a><% } %>';
             contactTemplate += '<% if (typeof(github) != "undefined" && typeof(github.data.login) != "undefined") { %><a href="http://github.com/<%= github.data.login %>" class="social_link github" target="_b">GitHub Profile</a><% } %>';
             contactTemplate += '</div>';
             contactTemplate += '<div class="clear"></div></li>';
@@ -493,9 +499,9 @@ $(function() {
 
             tmp = _.sortBy(tmp, sortFn);
             _.each(tmp, addContactToHTML);
-            
+
             countEl.html(tmp.length);
-            
+
             if ($('.contact').length === 1) {
                 this.drawDetailsPane($('.contact').data('cid'));
                 $('.contact').addClass('clicked');

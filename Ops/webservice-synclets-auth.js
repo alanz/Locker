@@ -27,7 +27,7 @@ var syncManager = require('lsyncmanager')
   ;
 
 try{
-    apiKeys = JSON.parse(fs.readFileSync(lconfig.lockerDir + "/Config/apikeys.json", 'ascii'))    
+    apiKeys = JSON.parse(fs.readFileSync(lconfig.lockerDir + "/Config/apikeys.json", 'utf-8'))
 }catch(e){}
 
 if (lconfig.externalSecure) {
@@ -52,6 +52,9 @@ module.exports = function(locker) {
     });
     locker.get('/auth/twitter/auth', function(req, res) {
         handleTwitter(req, res);
+    });
+    locker.get('/auth/flickr/auth', function(req, res) {
+        handleFlickr(req, res);
     });
 };
 
@@ -100,40 +103,13 @@ function handleOAuth2Post (code, options, res) {
                   client_id:apiKeys[options.provider].appKey,
                   client_secret:apiKeys[options.provider].appSecret,
                   redirect_uri:host + options.redirectURI};
-        // request won't ever return here.  no idea why.
-        //
-        // request({method: 'post', uri :options.endPoint, body: querystring.stringify(postData)}, function(err, resp, body) {
-        //     console.error(err);
-        //     console.error(resp);
-        //     console.error(body);
-        //     auth = {};
-        //     auth.token = JSON.parse(data);
-        //     installSynclet(options.provider, auth);
-        //     res.end("<script type='text/javascript'>if (window.opener) { window.opener.location.reload(true); } window.close(); </script>");
-        // });
+        request({method: 'POST', uri :options.endPoint, body: querystring.stringify(postData), headers : {'Content-Type' : 'application/x-www-form-urlencoded'}}, function(err, resp, body) {
+           auth = {};
+            auth.token = JSON.parse(body);
+            installSynclet(options.provider, auth);
+            res.end("<script type='text/javascript'>if (window.opener) { window.opener.location.reload(true); } window.close(); </script>");
+        });
 
-        var httpOptions = {
-            host: 'accounts.google.com',
-            port: 443,
-            path: '/o/oauth2/token',
-            method: 'POST',
-            headers: {'Content-Type':'application/x-www-form-urlencoded'}
-        };
-        var httpsReq = https.request(httpOptions, function(httpsRes) {
-            httpsRes.on('data', function(data) {
-                auth = {};
-                auth.clientID = apiKeys[options.provider].appKey;
-                auth.clientSecret = apiKeys[options.provider].appSecret;
-                auth.token = JSON.parse(data);
-                installSynclet(options.provider, auth);
-                res.end("<script type='text/javascript'> window.close(); </script>");
-            });
-        });
-        httpsReq.write(querystring.stringify(postData));
-        httpsReq.on('error', function(e) {
-            console.error('DEBUG: e', e);
-        });
-        httpsReq.end();
     } catch (E) {
         res.end('failed to authenticate against service - ' + E);
     }
@@ -154,6 +130,23 @@ function handleTwitter (req, res) {
         res.end('failed to authenticate against service - ' + E);
     }
 }
+
+function handleFlickr (req, res) {
+    var client = require('flickr-js')(apiKeys.flickr.appKey, apiKeys.flickr.appSecret);
+    var frob = req.param('frob');
+    if(!frob) { //starting out
+        res.redirect(client.getAuthURL('read'));
+    } else { //finishing
+        client.getTokenFromFrob(frob, function(err, auth) {
+            auth.apiKey = apiKeys.flickr.appKey;
+            auth.apiSecret = apiKeys.flickr.appSecret;
+            auth.token = auth.token;
+            installSynclet("flickr", auth);
+            res.end("<script type='text/javascript'> window.close(); </script>");
+        });
+    }
+}
+
 
 function installSynclet (provider, auth) {
     var avail = syncManager.synclets().available;
